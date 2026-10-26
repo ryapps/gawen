@@ -112,6 +112,20 @@ export async function decideJoinRequest(input: {
 }) {
   return prisma.$transaction(
     async (transaction) => {
+      const ownerMembership =
+        await transaction.organizationMembership.findUnique({
+          where: {
+            organizationId_userId: {
+              organizationId: input.organizationId,
+              userId: input.ownerUserId,
+            },
+          },
+          select: { role: true },
+        });
+      if (ownerMembership?.role !== OrganizationRole.OWNER) {
+        return { result: "not-owner" as const };
+      }
+
       const joinRequest = await transaction.employeeJoinRequest.findFirst({
         where: {
           id: input.requestId,
@@ -161,12 +175,26 @@ export async function decideJoinRequest(input: {
 
 export function rotateBusinessCode(
   organizationId: string,
+  ownerUserId: string,
   businessCodeHash: string,
 ) {
-  return prisma.organization.update({
-    where: { id: organizationId },
-    data: { businessCodeHash },
-    select: { id: true },
+  return prisma.$transaction(async (transaction) => {
+    const ownerMembership =
+      await transaction.organizationMembership.findUnique({
+        where: {
+          organizationId_userId: { organizationId, userId: ownerUserId },
+        },
+        select: { role: true },
+      });
+    if (ownerMembership?.role !== OrganizationRole.OWNER) {
+      return { result: "not-owner" as const };
+    }
+
+    const updated = await transaction.organization.updateMany({
+      where: { id: organizationId },
+      data: { businessCodeHash },
+    });
+    return { result: updated.count === 1 ? "rotated" as const : "missing" as const };
   });
 }
 
@@ -177,25 +205,57 @@ export function createInvitation(input: {
   tokenHash: string;
   expiresAt: Date;
 }) {
-  return prisma.organizationInvitation.create({
-    data: input,
-    select: { id: true, email: true, expiresAt: true, createdAt: true },
+  return prisma.$transaction(async (transaction) => {
+    const ownerMembership =
+      await transaction.organizationMembership.findUnique({
+        where: {
+          organizationId_userId: {
+            organizationId: input.organizationId,
+            userId: input.createdByUserId,
+          },
+        },
+        select: { role: true },
+      });
+    if (ownerMembership?.role !== OrganizationRole.OWNER) {
+      return { result: "not-owner" as const };
+    }
+
+    const invitation = await transaction.organizationInvitation.create({
+      data: input,
+      select: { id: true, email: true, expiresAt: true, createdAt: true },
+    });
+    return { result: "created" as const, invitation };
   });
 }
 
 export function revokeInvitation(
   organizationId: string,
+  ownerUserId: string,
   invitationId: string,
 ) {
-  return prisma.organizationInvitation.updateMany({
-    where: {
-      id: invitationId,
-      organizationId,
-      acceptedAt: null,
-      revokedAt: null,
-      expiresAt: { gt: new Date() },
-    },
-    data: { revokedAt: new Date() },
+  return prisma.$transaction(async (transaction) => {
+    const ownerMembership =
+      await transaction.organizationMembership.findUnique({
+        where: {
+          organizationId_userId: { organizationId, userId: ownerUserId },
+        },
+        select: { role: true },
+      });
+    if (ownerMembership?.role !== OrganizationRole.OWNER) {
+      return { result: "not-owner" as const };
+    }
+
+    const revoked = await transaction.organizationInvitation.updateMany({
+      where: {
+        id: invitationId,
+        organizationId,
+        acceptedAt: null,
+        revokedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      data: { revokedAt: new Date() },
+    });
+    return { result: revoked.count === 1 ? "revoked" as const : "missing" as const };
   });
 }
 

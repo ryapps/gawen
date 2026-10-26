@@ -10,16 +10,46 @@ import errorHandler from "../src/middlewares/error.middleware.js";
 import prisma from "../src/lib/prisma.js";
 
 const TEST_PASSWORD = "Correct-Horse-Battery-42!";
+const REGISTRATION_MESSAGE =
+  "Jika registrasi dapat diproses, akun telah dibuat. Silakan masuk.";
 const userIds = new Set<string>();
 const organizationIds = new Set<string>();
+const testIps = new Set<string>();
 let authorizationApp: express.Express;
 let nextTestIp = 1;
+
+type TestUser = {
+  id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  memberships: {
+    id: string;
+    role: string;
+    organization: { id: string; name: string; timezone: string };
+  }[];
+};
+
+type TestAuthResponse = {
+  status: number;
+  body: {
+    data: {
+      accessToken: string;
+      tokenType: string;
+      expiresAt: string;
+      user: TestUser;
+      businessJoinCode?: string;
+    };
+  };
+  signup?: request.Response;
+};
 
 function nextIp(): string {
   return `198.51.100.${nextTestIp++}`;
 }
 
 function fromIp(ip: string) {
+  testIps.add(ip);
   return (target: express.Express) => ({
     get: (path: string) =>
       request(target).get(path).set("x-forwarded-for", ip),
@@ -28,7 +58,7 @@ function fromIp(ip: string) {
   });
 }
 
-function registration(
+function submitOwnerRegistration(
   email = `owner-${randomUUID()}@example.test`,
   ip = nextIp(),
 ) {
@@ -40,7 +70,7 @@ function registration(
   });
 }
 
-function employeeRegistration(
+function submitEmployeeRegistration(
   email = `employee-${randomUUID()}@example.test`,
   ip = nextIp(),
 ) {
@@ -51,7 +81,58 @@ function employeeRegistration(
   });
 }
 
-function rememberUser(response: request.Response): {
+async function loginAccount(email: string): Promise<request.Response> {
+  return fromIp(nextIp())(app).post("/api/auth/login").send({
+    email,
+    password: TEST_PASSWORD,
+  });
+}
+
+async function registration(
+  email = `owner-${randomUUID()}@example.test`,
+  ip = nextIp(),
+): Promise<TestAuthResponse> {
+  const signup = await submitOwnerRegistration(email, ip);
+  assert.equal(signup.status, 202);
+  assert.deepEqual(signup.body, {
+    status: "ok",
+    message: REGISTRATION_MESSAGE,
+  });
+  const login = await loginAccount(email.toLowerCase());
+  assert.equal(login.status, 200);
+  const organizationId = login.body.data.user.memberships[0].organization.id as string;
+  const code = await fromIp(nextIp())(app)
+    .post(`/api/employees/organizations/${organizationId}/business-code/rotate`)
+    .set("Authorization", `Bearer ${login.body.data.accessToken}`);
+  assert.equal(code.status, 200);
+  return {
+    status: signup.status,
+    signup,
+    body: {
+      data: {
+        ...login.body.data,
+        businessJoinCode: code.body.data.businessCode,
+      },
+    },
+  };
+}
+
+async function employeeRegistration(
+  email = `employee-${randomUUID()}@example.test`,
+  ip = nextIp(),
+): Promise<TestAuthResponse> {
+  const signup = await submitEmployeeRegistration(email, ip);
+  assert.equal(signup.status, 202);
+  assert.deepEqual(signup.body, {
+    status: "ok",
+    message: REGISTRATION_MESSAGE,
+  });
+  const login = await loginAccount(email.toLowerCase());
+  assert.equal(login.status, 200);
+  return { status: signup.status, signup, body: login.body };
+}
+
+function rememberUser(response: TestAuthResponse): {
   userId: string;
   organizationId: string;
   token: string;
@@ -69,7 +150,7 @@ function rememberUser(response: request.Response): {
   };
 }
 
-function rememberStandaloneUser(response: request.Response): {
+function rememberStandaloneUser(response: TestAuthResponse): {
   userId: string;
   token: string;
 } {
@@ -94,6 +175,25 @@ before(async () => {
 
 after(async () => {
   try {
+    if (testIps.size > 0) {
+      const rateLimitRoutes = [
+        "register-owner",
+        "register-employee",
+        "login",
+        "join-request",
+        "business-code-rotate",
+        "employee-invitation",
+        "invitation-accept",
+      ];
+      const bucketKeys = [...testIps].flatMap((ip) =>
+        rateLimitRoutes.map((route) =>
+          createHash("sha256").update(`${route}:${ip}`).digest("hex"),
+        ),
+      );
+      await prisma.authRateLimitBucket.deleteMany({
+        where: { bucketKey: { in: bucketKeys } },
+      });
+    }
     if (userIds.size > 0 || organizationIds.size > 0) {
       await prisma.employeeJoinRequest.deleteMany({
         where: {
@@ -191,11 +291,17 @@ test("registration creates an owner, organization, and session without exposing 
   const email = `Owner-${randomUUID()}@Example.Test`;
   const response = await registration(email);
 
-  assert.equal(response.status, 201);
+  assert.equal(response.status, 202);
+  assert.deepEqual(response.signup?.body, {
+    status: "ok",
+    message: REGISTRATION_MESSAGE,
+  });
   const created = rememberUser(response);
   assert.equal(response.body.data.user.email, email.toLowerCase());
   assert.equal(response.body.data.user.memberships[0].role, "OWNER");
-  assert.match(response.body.data.businessJoinCode, /^[A-Za-z0-9_-]{16}$/);
+  const businessJoinCode = response.body.data.businessJoinCode;
+  assert.ok(businessJoinCode);
+  assert.match(businessJoinCode, /^[A-Za-z0-9_-]{16}$/);
   assert.equal(response.body.data.tokenType, "Bearer");
   assert.match(created.token, /^[A-Za-z0-9_-]{43}$/);
   assert.equal("passwordHash" in response.body.data.user, false);
@@ -212,13 +318,13 @@ test("registration creates an owner, organization, and session without exposing 
   });
   assert.notEqual(
     organization.businessCodeHash,
-    response.body.data.businessJoinCode,
+    businessJoinCode,
   );
 });
 
 test("employee self-registration creates an authenticated account without organization access", async () => {
   const response = await employeeRegistration();
-  assert.equal(response.status, 201);
+  assert.equal(response.status, 202);
   const employee = rememberStandaloneUser(response);
   assert.equal("businessJoinCode" in response.body.data, false);
 
@@ -567,7 +673,7 @@ test("registration rolls back all records when organization creation fails", asy
   const originalConsoleError = console.error;
   console.error = () => {};
   try {
-    const response = await registration(email);
+    const response = await submitOwnerRegistration(email);
     assert.equal(response.status, 500);
     assert.equal(
       JSON.stringify(response.body).includes("forced test organization insert failure"),
@@ -589,26 +695,31 @@ test("concurrent registration with the same normalized email creates only one ac
   const email = `duplicate-${randomUUID()}@example.test`;
   const ip = nextIp();
   const responses = await Promise.all([
-    registration(email, ip),
-    registration(email.toUpperCase(), ip),
+    submitOwnerRegistration(email, ip),
+    submitOwnerRegistration(email.toUpperCase(), ip),
   ]);
 
   assert.deepEqual(
     responses.map((response) => response.status).sort(),
-    [201, 409],
+    [202, 202],
   );
-  assert.equal(
-    responses.find((response) => response.status === 409)?.body.message,
-    "Registrasi tidak dapat diproses.",
-  );
-  const successful = responses.find((response) => response.status === 201);
-  assert.ok(successful);
-  rememberUser(successful);
+  assert.deepEqual(responses[0].body, responses[1].body);
+  const user = await prisma.user.findUniqueOrThrow({
+    where: { email: email.toLowerCase() },
+    select: {
+      id: true,
+      memberships: { select: { organizationId: true } },
+    },
+  });
+  userIds.add(user.id);
+  for (const membership of user.memberships) {
+    organizationIds.add(membership.organizationId);
+  }
 });
 
 test("login accepts valid credentials and returns a generic error for invalid credentials", async () => {
   const registrationResponse = await registration();
-  assert.equal(registrationResponse.status, 201);
+  assert.equal(registrationResponse.status, 202);
   const created = rememberUser(registrationResponse);
 
   const validLogin = await fromIp(nextIp())(app)
@@ -645,7 +756,7 @@ test("login accepts valid credentials and returns a generic error for invalid cr
 
 test("profile requires a valid bearer session and logout revokes it", async () => {
   const registered = await registration();
-  assert.equal(registered.status, 201);
+  assert.equal(registered.status, 202);
   const created = rememberUser(registered);
   const profileRequest = () =>
     fromIp(nextIp())(app)
@@ -678,8 +789,8 @@ test("profile requires a valid bearer session and logout revokes it", async () =
 test("role middleware checks live organization membership and prevents cross-organization access", async () => {
   const ownerResponse = await registration();
   const otherOwnerResponse = await registration();
-  assert.equal(ownerResponse.status, 201);
-  assert.equal(otherOwnerResponse.status, 201);
+  assert.equal(ownerResponse.status, 202);
+  assert.equal(otherOwnerResponse.status, 202);
   const owner = rememberUser(ownerResponse);
   const otherOwner = rememberUser(otherOwnerResponse);
 

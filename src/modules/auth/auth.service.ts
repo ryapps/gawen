@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from "node:crypto";
 import argon2 from "argon2";
 import { HttpError } from "../../lib/http-error.js";
 import type { AuthUser } from "../../types/auth.js";
@@ -8,6 +9,7 @@ import type {
   RegisterOwnerInput,
 } from "./auth.validation.js";
 
+const SESSION_LIFETIME_MS = 24 * 60 * 60 * 1000;
 const PASSWORD_HASH_OPTIONS = {
   type: argon2.argon2id,
   memoryCost: 65_536,
@@ -18,6 +20,15 @@ const DUMMY_PASSWORD_HASH = argon2.hash(
   randomBytes(32).toString("hex"),
   PASSWORD_HASH_OPTIONS,
 );
+
+function hashToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function createToken() {
+  const token = randomBytes(32).toString("base64url");
+  return { token, tokenHash: hashToken(token) };
+}
 
 export async function registerOwner(input: RegisterOwnerInput) {
   const passwordHash = await argon2.hash(input.password, PASSWORD_HASH_OPTIONS);

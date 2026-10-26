@@ -74,7 +74,10 @@ export const rejectRequest = decide(false);
 
 export const rotateBusinessCode: RequestHandler = async (req, res) => {
   const organizationId = getRouteParam(req, "organizationId", "Organisasi tidak valid.");
-  const result = await employeesService.rotateBusinessCode(organizationId);
+  const result = await employeesService.rotateBusinessCode(
+    getAuth(req),
+    organizationId,
+  );
   res.status(200).json({ status: "ok", data: result });
 };
 
@@ -95,6 +98,7 @@ export const revokeInvitation: RequestHandler = async (req, res) => {
   const organizationId = getRouteParam(req, "organizationId", "Organisasi tidak valid.");
   const invitationId = getRouteParam(req, "invitationId", "Undangan tidak valid.");
   const result = await employeesService.revokeInvitation(
+    getAuth(req),
     organizationId,
     invitationId,
   );

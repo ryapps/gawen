@@ -59,6 +59,9 @@ export async function decideRequest(
       ownerUserId: auth.user.id,
       approve,
     });
+    if (result.result === "not-owner") {
+      throw new HttpError(403, "Anda tidak memiliki akses.");
+    }
     if (result.result === "self-approval") {
       throw new HttpError(403, "Permintaan ini tidak dapat disetujui sendiri.");
     }
@@ -80,12 +83,22 @@ export async function decideRequest(
   }
 }
 
-export async function rotateBusinessCode(organizationId: string) {
+export async function rotateBusinessCode(
+  auth: AuthContext,
+  organizationId: string,
+) {
   const businessCode = randomBytes(12).toString("base64url");
-  await employeesRepository.rotateBusinessCode(
+  const result = await employeesRepository.rotateBusinessCode(
     organizationId,
+    auth.user.id,
     hashToken(businessCode),
   );
+  if (result.result === "not-owner") {
+    throw new HttpError(403, "Anda tidak memiliki akses.");
+  }
+  if (result.result === "missing") {
+    throw new HttpError(404, "Organisasi tidak tersedia.");
+  }
   return { businessCode };
 }
 
@@ -103,7 +116,10 @@ export async function createInvitation(
     tokenHash: hashToken(token),
     expiresAt,
   });
-  return { ...invitation, token };
+  if (invitation.result === "not-owner") {
+    throw new HttpError(403, "Anda tidak memiliki akses.");
+  }
+  return { ...invitation.invitation, token };
 }
 
 export async function acceptInvitation(
@@ -135,14 +151,19 @@ export async function acceptInvitation(
 }
 
 export async function revokeInvitation(
+  auth: AuthContext,
   organizationId: string,
   invitationId: string,
 ) {
   const revoked = await employeesRepository.revokeInvitation(
     organizationId,
+    auth.user.id,
     invitationId,
   );
-  if (revoked.count !== 1) {
+  if (revoked.result === "not-owner") {
+    throw new HttpError(403, "Anda tidak memiliki akses.");
+  }
+  if (revoked.result === "missing") {
     throw new HttpError(404, "Undangan tidak tersedia.");
   }
   return { status: "REVOKED" as const };
