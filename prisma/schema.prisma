@@ -1,0 +1,500 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum OrganizationRole {
+  OWNER
+  EMPLOYEE
+}
+
+enum JoinRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum ShiftAssignmentStatus {
+  DRAFT
+  PUBLISHED
+  CANCELLED
+}
+
+enum SwapRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum AttendanceStatus {
+  PRESENT
+  LATE
+  INCOMPLETE
+  ABSENT
+}
+
+enum CorrectionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum LoanStatus {
+  ACTIVE
+  PAID
+  CANCELLED
+}
+
+enum RepaymentType {
+  MANUAL_PAYMENT
+  PAYROLL_DEDUCTION
+}
+
+enum WageType {
+  PER_SHIFT
+  DAILY
+  MONTHLY
+}
+
+enum PayrollPeriodType {
+  WEEKLY
+  MONTHLY
+}
+
+enum PayrollStatus {
+  DRAFT
+  REVIEWED
+  FINALIZED
+  PAID
+}
+
+enum AdjustmentType {
+  ADDITION
+  DEDUCTION
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  APPROVE
+  REJECT
+  FINALIZE
+  MARK_PAID
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  phone        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  memberships           OrganizationMembership[]
+  employees             Employee[]               @relation("EmployeeUser")
+  auditLogs             AuditLog[]               @relation("AuditActor")
+  reviewedSwapRequests  ShiftSwapRequest[]       @relation("SwapReviewer")
+  reviewedCorrections   AttendanceCorrection[]   @relation("CorrectionReviewer")
+  approvedLoans         Loan[]                   @relation("LoanApprover")
+  createdPayrollPeriods PayrollPeriod[]          @relation("PayrollPeriodCreator")
+  createdAdjustments    PayrollAdjustment[]      @relation("AdjustmentCreator")
+  sessions              AuthSession[]
+  joinRequests          EmployeeJoinRequest[]    @relation("JoinRequestUser")
+  decidedJoinRequests   EmployeeJoinRequest[]    @relation("JoinRequestDecider")
+  sentInvitations       OrganizationInvitation[] @relation("InvitationCreator")
+}
+
+model AuthSession {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt])
+}
+
+model AuthRateLimitBucket {
+  bucketKey       String   @id
+  count           Int
+  windowStartedAt DateTime
+  updatedAt       DateTime @updatedAt
+
+  @@index([windowStartedAt])
+}
+
+model Organization {
+  id               String   @id @default(cuid())
+  name             String
+  businessCodeHash String?  @unique
+  timezone         String   @default("Asia/Jakarta")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  memberships    OrganizationMembership[]
+  employees      Employee[]
+  shifts         Shift[]
+  assignments    ShiftAssignment[]
+  swapRequests   ShiftSwapRequest[]
+  attendances    Attendance[]
+  corrections    AttendanceCorrection[]
+  loans          Loan[]
+  payrollPeriods PayrollPeriod[]
+  auditLogs      AuditLog[]
+  joinRequests   EmployeeJoinRequest[]
+  invitations    OrganizationInvitation[]
+
+  @@index([name])
+}
+
+model OrganizationMembership {
+  id             String           @id @default(cuid())
+  organizationId String
+  userId         String
+  role           OrganizationRole @default(EMPLOYEE)
+  createdAt      DateTime         @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, userId])
+  @@index([userId, role])
+}
+
+model EmployeeJoinRequest {
+  id             String            @id @default(cuid())
+  organizationId String
+  userId         String
+  status         JoinRequestStatus @default(PENDING)
+  decidedById    String?
+  decidedAt      DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation("JoinRequestUser", fields: [userId], references: [id], onDelete: Cascade)
+  decidedBy    User?        @relation("JoinRequestDecider", fields: [decidedById], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, userId])
+  @@index([organizationId, status, createdAt])
+  @@index([userId, status])
+}
+
+model OrganizationInvitation {
+  id              String    @id @default(cuid())
+  organizationId  String
+  createdByUserId String
+  email           String
+  tokenHash       String    @unique
+  expiresAt       DateTime
+  acceptedAt      DateTime?
+  revokedAt       DateTime?
+  createdAt       DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User         @relation("InvitationCreator", fields: [createdByUserId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, email, createdAt])
+  @@index([expiresAt])
+}
+
+model Employee {
+  id             String         @id @default(cuid())
+  organizationId String
+  userId         String?
+  employeeCode   String
+  fullName       String
+  phone          String?
+  status         EmployeeStatus @default(ACTIVE)
+  hiredAt        DateTime?      @db.Date
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  user User? @relation("EmployeeUser", fields: [userId], references: [id], onDelete: Restrict)
+
+  assignments    ShiftAssignment[]
+  requestedSwaps ShiftSwapRequest[]     @relation("SwapRequester")
+  attendances    Attendance[]
+  corrections    AttendanceCorrection[] @relation("CorrectionRequester")
+  loans          Loan[]
+  payrollRecords PayrollRecord[]
+
+  @@unique([organizationId, employeeCode])
+  @@unique([organizationId, userId])
+  @@index([organizationId, status])
+  @@index([organizationId, fullName])
+}
+
+model Shift {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  startTime      DateTime @db.Time(0)
+  endTime        DateTime @db.Time(0)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  assignments ShiftAssignment[]
+
+  @@index([organizationId, isActive])
+}
+
+model ShiftAssignment {
+  id             String                @id @default(cuid())
+  organizationId String
+  employeeId     String
+  shiftId        String?
+  workDate       DateTime              @db.Date
+  startsAt       DateTime
+  endsAt         DateTime
+  status         ShiftAssignmentStatus @default(DRAFT)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  shift Shift? @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+
+  attendance Attendance?
+
+  requestedSwaps ShiftSwapRequest[] @relation("SwapSource")
+  targetSwaps    ShiftSwapRequest[] @relation("SwapTarget")
+
+  @@unique([employeeId, startsAt])
+  @@index([organizationId, workDate, status])
+  @@index([employeeId, workDate])
+}
+
+model ShiftSwapRequest {
+  id                    String            @id @default(cuid())
+  organizationId        String
+  requestedByEmployeeId String
+  sourceAssignmentId    String
+  targetAssignmentId    String
+  status                SwapRequestStatus @default(PENDING)
+  reason                String?
+  reviewedByUserId      String?
+  reviewedAt            DateTime?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  requester Employee @relation("SwapRequester", fields: [requestedByEmployeeId], references: [id], onDelete: Restrict)
+
+  sourceAssignment ShiftAssignment @relation("SwapSource", fields: [sourceAssignmentId], references: [id], onDelete: Restrict)
+
+  targetAssignment ShiftAssignment @relation("SwapTarget", fields: [targetAssignmentId], references: [id], onDelete: Restrict)
+
+  reviewedBy User? @relation("SwapReviewer", fields: [reviewedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, status, createdAt])
+}
+
+model Attendance {
+  id             String           @id @default(cuid())
+  organizationId String
+  employeeId     String
+  assignmentId   String?          @unique
+  checkInAt      DateTime?
+  checkOutAt     DateTime?
+  checkInLat     Decimal?         @db.Decimal(10, 7)
+  checkInLng     Decimal?         @db.Decimal(10, 7)
+  checkOutLat    Decimal?         @db.Decimal(10, 7)
+  checkOutLng    Decimal?         @db.Decimal(10, 7)
+  status         AttendanceStatus @default(PRESENT)
+  notes          String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  assignment ShiftAssignment? @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+
+  corrections AttendanceCorrection[]
+
+  @@index([organizationId, checkInAt])
+  @@index([employeeId, checkInAt])
+}
+
+model AttendanceCorrection {
+  id                    String           @id @default(cuid())
+  organizationId        String
+  attendanceId          String
+  requestedByEmployeeId String
+  requestedCheckInAt    DateTime?
+  requestedCheckOutAt   DateTime?
+  reason                String
+  status                CorrectionStatus @default(PENDING)
+  reviewedByUserId      String?
+  reviewedAt            DateTime?
+  reviewNote            String?
+  createdAt             DateTime         @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  attendance Attendance @relation(fields: [attendanceId], references: [id], onDelete: Restrict)
+
+  requester Employee @relation("CorrectionRequester", fields: [requestedByEmployeeId], references: [id], onDelete: Restrict)
+
+  reviewedBy User? @relation("CorrectionReviewer", fields: [reviewedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, status, createdAt])
+  @@index([attendanceId, status])
+}
+
+model Loan {
+  id               String     @id @default(cuid())
+  organizationId   String
+  employeeId       String
+  principal        Decimal    @db.Decimal(12, 2)
+  reason           String?
+  status           LoanStatus @default(ACTIVE)
+  approvedByUserId String?
+  approvedAt       DateTime?
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  repayments LoanRepayment[]
+
+  approvedBy User? @relation("LoanApprover", fields: [approvedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, status])
+  @@index([employeeId, status])
+}
+
+model LoanRepayment {
+  id              String        @id @default(cuid())
+  loanId          String
+  payrollRecordId String?
+  amount          Decimal       @db.Decimal(12, 2)
+  type            RepaymentType
+  paidAt          DateTime      @default(now())
+  note            String?
+  createdAt       DateTime      @default(now())
+
+  loan Loan @relation(fields: [loanId], references: [id], onDelete: Restrict)
+
+  payrollRecord PayrollRecord? @relation(fields: [payrollRecordId], references: [id], onDelete: Restrict)
+
+  @@index([loanId, paidAt])
+  @@index([payrollRecordId])
+}
+
+model PayrollPeriod {
+  id              String            @id @default(cuid())
+  organizationId  String
+  type            PayrollPeriodType
+  startDate       DateTime          @db.Date
+  endDate         DateTime          @db.Date
+  status          PayrollStatus     @default(DRAFT)
+  createdByUserId String
+  reviewedAt      DateTime?
+  finalizedAt     DateTime?
+  paidAt          DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  records PayrollRecord[]
+
+  createdBy User @relation("PayrollPeriodCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, startDate, endDate])
+  @@index([organizationId, status, startDate])
+}
+
+model PayrollRecord {
+  id              String   @id @default(cuid())
+  payrollPeriodId String
+  employeeId      String
+  wageType        WageType
+
+  basePay         Decimal @db.Decimal(12, 2)
+  additions       Decimal @default(0) @db.Decimal(12, 2)
+  grossPay        Decimal @db.Decimal(12, 2)
+  loanDeductions  Decimal @default(0) @db.Decimal(12, 2)
+  otherDeductions Decimal @default(0) @db.Decimal(12, 2)
+  netPay          Decimal @db.Decimal(12, 2)
+
+  calculationSnapshot Json?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  payrollPeriod PayrollPeriod @relation(fields: [payrollPeriodId], references: [id], onDelete: Restrict)
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  adjustments PayrollAdjustment[]
+  repayments  LoanRepayment[]
+
+  @@unique([payrollPeriodId, employeeId])
+  @@index([employeeId, payrollPeriodId])
+}
+
+model PayrollAdjustment {
+  id              String         @id @default(cuid())
+  payrollRecordId String
+  type            AdjustmentType
+  amount          Decimal        @db.Decimal(12, 2)
+  reason          String
+  createdByUserId String
+  createdAt       DateTime       @default(now())
+
+  payrollRecord PayrollRecord @relation(fields: [payrollRecordId], references: [id], onDelete: Restrict)
+
+  createdBy User @relation("AdjustmentCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([payrollRecordId, createdAt])
+}
+
+model AuditLog {
+  id             String      @id @default(cuid())
+  organizationId String
+  actorUserId    String?
+  action         AuditAction
+  entityType     String
+  entityId       String
+  metadata       Json?
+  createdAt      DateTime    @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  actor User? @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, createdAt])
+  @@index([entityType, entityId])
+  @@index([actorUserId, createdAt])
+}
