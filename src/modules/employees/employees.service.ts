@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomInt } from "node:crypto";
 import { Prisma } from "../../generated/prisma/client.js";
 import type { AuthContext } from "../../types/auth.js";
 import { HttpError } from "../../lib/http-error.js";
@@ -10,9 +10,18 @@ import type {
 } from "./employees.validation.js";
 
 const INVITATION_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
+const BUSINESS_CODE_CHARACTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+const BUSINESS_CODE_LENGTH = 8;
 
 function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
+}
+
+function createBusinessCode(): string {
+  return Array.from(
+    { length: BUSINESS_CODE_LENGTH },
+    () => BUSINESS_CODE_CHARACTERS[randomInt(BUSINESS_CODE_CHARACTERS.length)],
+  ).join("");
 }
 
 export async function requestMembership(
@@ -87,7 +96,7 @@ export async function rotateBusinessCode(
   auth: AuthContext,
   organizationId: string,
 ) {
-  const businessCode = randomBytes(12).toString("base64url");
+  const businessCode = createBusinessCode();
   const result = await employeesRepository.rotateBusinessCode(
     organizationId,
     auth.user.id,

@@ -2,7 +2,11 @@ import { z } from "zod";
 
 export const joinOrganizationSchema = z
   .object({
-    businessCode: z.string().trim().min(12).max(64).regex(/^[A-Za-z0-9_-]+$/),
+    businessCode: z
+      .string()
+      .trim()
+      .toUpperCase()
+      .regex(/^[A-Z0-9]{8}$/),
   })
   .strict();
 

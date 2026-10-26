@@ -301,7 +301,7 @@ test("registration creates an owner, organization, and session without exposing 
   assert.equal(response.body.data.user.memberships[0].role, "OWNER");
   const businessJoinCode = response.body.data.businessJoinCode;
   assert.ok(businessJoinCode);
-  assert.match(businessJoinCode, /^[A-Za-z0-9_-]{16}$/);
+  assert.match(businessJoinCode, /^[A-Z0-9]{8}$/);
   assert.equal(response.body.data.tokenType, "Bearer");
   assert.match(created.token, /^[A-Za-z0-9_-]{43}$/);
   assert.equal("passwordHash" in response.body.data.user, false);
@@ -352,14 +352,16 @@ test("business-code join creates a pending request without granting access; owne
   const validCodeResponse = await fromIp(nextIp())(app)
     .post("/api/employees/join-requests")
     .set("Authorization", employeeAuth)
-    .send({ businessCode: ownerResponse.body.data.businessJoinCode });
+    .send({
+      businessCode: (ownerResponse.body.data.businessJoinCode as string).toLowerCase(),
+    });
   assert.equal(validCodeResponse.status, 202);
   assert.equal(validCodeResponse.body.message, "Jika kode bisnis valid dan belum ada permintaan, permintaan akan diproses.");
 
   const invalidCodeResponse = await fromIp(nextIp())(app)
     .post("/api/employees/join-requests")
     .set("Authorization", employeeAuth)
-    .send({ businessCode: randomBytes(12).toString("base64url") });
+    .send({ businessCode: randomBytes(4).toString("hex").toUpperCase() });
   assert.equal(invalidCodeResponse.status, 202);
   assert.equal(invalidCodeResponse.body.message, validCodeResponse.body.message);
 
@@ -523,6 +525,7 @@ test("business-code rotation invalidates the old code and leaves new requests pe
   assert.equal(rotated.status, 200);
   const newCode = rotated.body.data.businessCode as string;
   assert.notEqual(newCode, originalCode);
+  assert.match(newCode, /^[A-Z0-9]{8}$/);
 
   const oldCodeApplication = await fromIp(nextIp())(app)
     .post("/api/employees/join-requests")
@@ -545,11 +548,17 @@ test("join requests are rate-limited and reject client-controlled membership fie
   const employeeResponse = await employeeRegistration();
   const employee = rememberStandaloneUser(employeeResponse);
   const authorization = `Bearer ${employee.token}`;
+  const malformedCode = await fromIp(nextIp())(app)
+    .post("/api/employees/join-requests")
+    .set("Authorization", authorization)
+    .send({ businessCode: "TOO-SHORT" });
+  assert.equal(malformedCode.status, 400);
+
   const forgedMembership = await fromIp(nextIp())(app)
     .post("/api/employees/join-requests")
     .set("Authorization", authorization)
     .send({
-      businessCode: randomBytes(12).toString("base64url"),
+      businessCode: randomBytes(4).toString("hex").toUpperCase(),
       organizationId: "attacker-controlled",
       role: "OWNER",
       status: "APPROVED",
@@ -563,7 +572,7 @@ test("join requests are rate-limited and reject client-controlled membership fie
       await fromIp(ip)(app)
         .post("/api/employees/join-requests")
         .set("Authorization", authorization)
-        .send({ businessCode: randomBytes(12).toString("base64url") }),
+        .send({ businessCode: randomBytes(4).toString("hex").toUpperCase() }),
     );
   }
   assert.deepEqual(
