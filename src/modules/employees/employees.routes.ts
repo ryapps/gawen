@@ -13,6 +13,16 @@ router.post(
 );
 router.get("/join-requests/me", employeesController.listOwnRequests);
 router.get(
+  "/organizations/:organizationId/members",
+  requireOrganizationRole("OWNER"),
+  employeesController.listOrganizationMembers,
+);
+router.get(
+  "/organizations/:organizationId/members/:membershipId",
+  requireOrganizationRole("OWNER"),
+  employeesController.getOrganizationMember,
+);
+router.get(
   "/organizations/:organizationId/join-requests",
   requireOrganizationRole("OWNER"),
   employeesController.listPendingRequests,

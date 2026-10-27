@@ -5,6 +5,38 @@ import {
 } from "../../generated/prisma/client.js";
 import prisma from "../../lib/prisma.js";
 
+const organizationMemberSelect = {
+  id: true,
+  role: true,
+  createdAt: true,
+  user: {
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      phone: true,
+    },
+  },
+} as const;
+
+export function findOrganizationMembers(organizationId: string) {
+  return prisma.organizationMembership.findMany({
+    where: { organizationId },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    select: organizationMemberSelect,
+  });
+}
+
+export function findOrganizationMember(
+  organizationId: string,
+  membershipId: string,
+) {
+  return prisma.organizationMembership.findFirst({
+    where: { id: membershipId, organizationId },
+    select: organizationMemberSelect,
+  });
+}
+
 export async function requestMembership(
   userId: string,
   businessCodeHash: string,

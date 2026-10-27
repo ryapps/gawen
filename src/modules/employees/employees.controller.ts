@@ -49,6 +49,23 @@ export const listOwnRequests: RequestHandler = async (req, res) => {
   res.status(200).json({ status: "ok", data: { requests } });
 };
 
+export const listOrganizationMembers: RequestHandler = async (req, res) => {
+  const organizationId = getRouteParam(req, "organizationId", "Organisasi tidak valid.");
+  const members =
+    await employeesService.listOrganizationMembers(organizationId);
+  res.status(200).json({ status: "ok", data: { members } });
+};
+
+export const getOrganizationMember: RequestHandler = async (req, res) => {
+  const organizationId = getRouteParam(req, "organizationId", "Organisasi tidak valid.");
+  const membershipId = getRouteParam(req, "membershipId", "Anggota tidak valid.");
+  const member = await employeesService.getOrganizationMember(
+    organizationId,
+    membershipId,
+  );
+  res.status(200).json({ status: "ok", data: { member } });
+};
+
 export const listPendingRequests: RequestHandler = async (req, res) => {
   const organizationId = getRouteParam(req, "organizationId", "Organisasi tidak valid.");
   const requests = await employeesService.listPendingRequests(organizationId);

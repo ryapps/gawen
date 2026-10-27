@@ -8,6 +8,11 @@ import app from "../src/app.js";
 import { requireAuth, requireOrganizationRole } from "../src/middlewares/auth.middleware.js";
 import errorHandler from "../src/middlewares/error.middleware.js";
 import prisma from "../src/lib/prisma.js";
+import {
+  loginSchema,
+  registerEmployeeSchema,
+  registerOwnerSchema,
+} from "../src/modules/auth/auth.validation.js";
 
 const TEST_PASSWORD = "Correct-Horse-Battery-42!";
 const REGISTRATION_MESSAGE =
@@ -17,6 +22,49 @@ const organizationIds = new Set<string>();
 const testIps = new Set<string>();
 let authorizationApp: express.Express;
 let nextTestIp = 1;
+
+test("password validation requires 8 characters without extra complexity rules", () => {
+  const owner = (password: string) =>
+    registerOwnerSchema.safeParse({
+      name: "Test Owner",
+      email: "owner@example.test",
+      password,
+      organizationName: "Test Organization",
+    }).success;
+  const employee = (password: string) =>
+    registerEmployeeSchema.safeParse({
+      name: "Test Employee",
+      email: "employee@example.test",
+      password,
+    }).success;
+
+  for (const password of ["", "x", "1234567"]) {
+    assert.equal(owner(password), false);
+    assert.equal(employee(password), false);
+  }
+  for (const password of [
+    "12345678",
+    "123456789",
+    "lowercase",
+    "        ",
+    "😀😀😀😀😀😀😀😀",
+    "a".repeat(128),
+  ]) {
+    assert.equal(owner(password), true);
+    assert.equal(employee(password), true);
+  }
+  assert.equal(owner("a".repeat(129)), false);
+  assert.equal(employee("a".repeat(129)), false);
+  assert.equal(owner("😀😀😀😀"), false);
+  assert.equal(employee("😀😀😀😀"), false);
+  assert.equal(
+    loginSchema.safeParse({
+      email: "legacy@example.test",
+      password: "short",
+    }).success,
+    true,
+  );
+});
 
 type TestUser = {
   id: string;
@@ -55,17 +103,20 @@ function fromIp(ip: string) {
       request(target).get(path).set("x-forwarded-for", ip),
     post: (path: string) =>
       request(target).post(path).set("x-forwarded-for", ip),
+    patch: (path: string) =>
+      request(target).patch(path).set("x-forwarded-for", ip),
   });
 }
 
 function submitOwnerRegistration(
   email = `owner-${randomUUID()}@example.test`,
   ip = nextIp(),
+  password = TEST_PASSWORD,
 ) {
   return fromIp(ip)(app).post("/api/auth/register").send({
     name: "Test Owner",
     email,
-    password: TEST_PASSWORD,
+    password,
     organizationName: "Test Organization",
   });
 }
@@ -73,32 +124,37 @@ function submitOwnerRegistration(
 function submitEmployeeRegistration(
   email = `employee-${randomUUID()}@example.test`,
   ip = nextIp(),
+  password = TEST_PASSWORD,
 ) {
   return fromIp(ip)(app).post("/api/auth/register/employee").send({
     name: "Test Employee",
     email,
-    password: TEST_PASSWORD,
+    password,
   });
 }
 
-async function loginAccount(email: string): Promise<request.Response> {
+async function loginAccount(
+  email: string,
+  password = TEST_PASSWORD,
+): Promise<request.Response> {
   return fromIp(nextIp())(app).post("/api/auth/login").send({
     email,
-    password: TEST_PASSWORD,
+    password,
   });
 }
 
 async function registration(
   email = `owner-${randomUUID()}@example.test`,
   ip = nextIp(),
+  password = TEST_PASSWORD,
 ): Promise<TestAuthResponse> {
-  const signup = await submitOwnerRegistration(email, ip);
+  const signup = await submitOwnerRegistration(email, ip, password);
   assert.equal(signup.status, 202);
   assert.deepEqual(signup.body, {
     status: "ok",
     message: REGISTRATION_MESSAGE,
   });
-  const login = await loginAccount(email.toLowerCase());
+  const login = await loginAccount(email.toLowerCase(), password);
   assert.equal(login.status, 200);
   const organizationId = login.body.data.user.memberships[0].organization.id as string;
   const code = await fromIp(nextIp())(app)
@@ -246,6 +302,36 @@ after(async () => {
   } finally {
     await prisma.$disconnect();
   }
+});
+
+test("registration accepts an eight-character password without complexity rules", async () => {
+  const response = await registration(
+    `eight-char-${randomUUID()}@example.test`,
+    nextIp(),
+    "lowercas",
+  );
+  const created = rememberUser(response);
+  assert.equal(response.status, 202);
+  assert.equal(response.body.data.user.memberships[0].role, "OWNER");
+  assert.ok(created.userId);
+});
+
+test("login continues to accept an existing password shorter than eight characters", async () => {
+  const email = `legacy-${randomUUID()}@example.test`;
+  const password = "oldpass";
+  const user = await prisma.user.create({
+    data: {
+      name: "Legacy User",
+      email,
+      passwordHash: await argon2.hash(password),
+    },
+    select: { id: true },
+  });
+  userIds.add(user.id);
+
+  const response = await loginAccount(email, password);
+  assert.equal(response.status, 200);
+  assert.equal(response.body.data.user.email, email);
 });
 
 test("registration validates input and rejects client-controlled role or organization", async () => {
@@ -867,6 +953,138 @@ test("role middleware checks live organization membership and prevents cross-org
     .get(`/organizations/${owner.organizationId}/owner`)
     .set("Authorization", `Bearer ${owner.token}`);
   assert.equal(revokedMembershipAccess.status, 403);
+});
+
+test("organization endpoints scope reads to members and restrict updates to owners", async () => {
+  const ownerResponse = await registration();
+  const owner = rememberUser(ownerResponse);
+  const employeeResponse = await employeeRegistration();
+  const employee = rememberStandaloneUser(employeeResponse);
+  const otherOwnerResponse = await registration();
+  const otherOwner = rememberUser(otherOwnerResponse);
+
+  await prisma.organizationMembership.create({
+    data: {
+      userId: employee.userId,
+      organizationId: owner.organizationId,
+      role: "EMPLOYEE",
+    },
+  });
+
+  const organizationPath = `/api/organizations/${owner.organizationId}`;
+  const unauthenticated = await fromIp(nextIp())(app).get(organizationPath);
+  assert.equal(unauthenticated.status, 401);
+
+  const ownerRead = await fromIp(nextIp())(app)
+    .get(organizationPath)
+    .set("Authorization", `Bearer ${owner.token}`);
+  assert.equal(ownerRead.status, 200);
+  assert.equal(ownerRead.body.data.organization.id, owner.organizationId);
+  assert.equal(ownerRead.body.data.organization.memberCount, 2);
+  assert.equal("businessCodeHash" in ownerRead.body.data.organization, false);
+
+  const employeeRead = await fromIp(nextIp())(app)
+    .get(organizationPath)
+    .set("Authorization", `Bearer ${employee.token}`);
+  assert.equal(employeeRead.status, 200);
+
+  const crossOrganizationRead = await fromIp(nextIp())(app)
+    .get(`/api/organizations/${otherOwner.organizationId}`)
+    .set("Authorization", `Bearer ${owner.token}`);
+  assert.equal(crossOrganizationRead.status, 403);
+
+  const updated = await fromIp(nextIp())(app)
+    .patch(organizationPath)
+    .set("Authorization", `Bearer ${owner.token}`)
+    .send({ name: "Updated Gawen", timezone: "Asia/Makassar" });
+  assert.equal(updated.status, 200);
+  assert.equal(updated.body.data.organization.name, "Updated Gawen");
+  assert.equal(updated.body.data.organization.timezone, "Asia/Makassar");
+
+  const employeeUpdate = await fromIp(nextIp())(app)
+    .patch(organizationPath)
+    .set("Authorization", `Bearer ${employee.token}`)
+    .send({ name: "Unauthorized Change" });
+  assert.equal(employeeUpdate.status, 403);
+
+  const unknownField = await fromIp(nextIp())(app)
+    .patch(organizationPath)
+    .set("Authorization", `Bearer ${owner.token}`)
+    .send({ businessCodeHash: "client-value" });
+  assert.equal(unknownField.status, 400);
+
+  const invalidTimezone = await fromIp(nextIp())(app)
+    .patch(organizationPath)
+    .set("Authorization", `Bearer ${owner.token}`)
+    .send({ timezone: "Not/A_Timezone" });
+  assert.equal(invalidTimezone.status, 400);
+
+  const emptyUpdate = await fromIp(nextIp())(app)
+    .patch(organizationPath)
+    .set("Authorization", `Bearer ${owner.token}`)
+    .send({});
+  assert.equal(emptyUpdate.status, 400);
+});
+
+test("employee membership endpoints are owner-only and scope details to the organization", async () => {
+  const ownerResponse = await registration();
+  const owner = rememberUser(ownerResponse);
+  const employeeResponse = await employeeRegistration();
+  const employee = rememberStandaloneUser(employeeResponse);
+  const otherOwnerResponse = await registration();
+  const otherOwner = rememberUser(otherOwnerResponse);
+
+  const employeeMembership = await prisma.organizationMembership.create({
+    data: {
+      userId: employee.userId,
+      organizationId: owner.organizationId,
+      role: "EMPLOYEE",
+    },
+    select: { id: true },
+  });
+
+  const membersPath =
+    `/api/employees/organizations/${owner.organizationId}/members`;
+  const unauthenticated = await fromIp(nextIp())(app).get(membersPath);
+  assert.equal(unauthenticated.status, 401);
+
+  const members = await fromIp(nextIp())(app)
+    .get(membersPath)
+    .set("Authorization", `Bearer ${owner.token}`);
+  assert.equal(members.status, 200);
+  assert.equal(members.body.data.members.length, 2);
+  assert.deepEqual(
+    members.body.data.members
+      .map((member: { role: string }) => member.role)
+      .sort(),
+    ["EMPLOYEE", "OWNER"],
+  );
+  assert.equal("passwordHash" in members.body.data.members[0].user, false);
+  assert.equal("token" in members.body.data.members[0], false);
+
+  const memberPath =
+    `${membersPath}/${employeeMembership.id}`;
+  const member = await fromIp(nextIp())(app)
+    .get(memberPath)
+    .set("Authorization", `Bearer ${owner.token}`);
+  assert.equal(member.status, 200);
+  assert.equal(member.body.data.member.id, employeeMembership.id);
+  assert.equal(member.body.data.member.user.id, employee.userId);
+
+  const employeeAccess = await fromIp(nextIp())(app)
+    .get(membersPath)
+    .set("Authorization", `Bearer ${employee.token}`);
+  assert.equal(employeeAccess.status, 403);
+
+  const crossOrganizationMember = await fromIp(nextIp())(app)
+    .get(`${membersPath}/${otherOwnerResponse.body.data.user.memberships[0].id}`)
+    .set("Authorization", `Bearer ${owner.token}`);
+  assert.equal(crossOrganizationMember.status, 404);
+
+  const crossOrganizationList = await fromIp(nextIp())(app)
+    .get(`/api/employees/organizations/${owner.organizationId}/members`)
+    .set("Authorization", `Bearer ${otherOwner.token}`);
+  assert.equal(crossOrganizationList.status, 403);
 });
 
 test("auth endpoints apply database-backed rate limits", async () => {

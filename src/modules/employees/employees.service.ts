@@ -51,6 +51,24 @@ export function listOwnRequests(auth: AuthContext) {
   return employeesRepository.findUserJoinRequests(auth.user.id);
 }
 
+export function listOrganizationMembers(organizationId: string) {
+  return employeesRepository.findOrganizationMembers(organizationId);
+}
+
+export async function getOrganizationMember(
+  organizationId: string,
+  membershipId: string,
+) {
+  const member = await employeesRepository.findOrganizationMember(
+    organizationId,
+    membershipId,
+  );
+  if (!member) {
+    throw new HttpError(404, "Anggota tidak tersedia.");
+  }
+  return member;
+}
+
 export function listPendingRequests(organizationId: string) {
   return employeesRepository.findPendingJoinRequests(organizationId);
 }
