@@ -982,6 +982,8 @@ test("organization endpoints scope reads to members and restrict updates to owne
   assert.equal(ownerRead.body.data.organization.id, owner.organizationId);
   assert.equal(ownerRead.body.data.organization.memberCount, 2);
   assert.equal("businessCodeHash" in ownerRead.body.data.organization, false);
+  assert.equal(ownerRead.body.data.organization.currency, "IDR");
+  assert.equal(ownerRead.body.data.organization.businessType, null);
 
   const employeeRead = await fromIp(nextIp())(app)
     .get(organizationPath)
@@ -996,10 +998,44 @@ test("organization endpoints scope reads to members and restrict updates to owne
   const updated = await fromIp(nextIp())(app)
     .patch(organizationPath)
     .set("Authorization", `Bearer ${owner.token}`)
-    .send({ name: "Updated Gawen", timezone: "Asia/Makassar" });
+    .send({
+      name: "Updated Gawen",
+      businessType: "Cafe",
+      description: "Kedai kopi dan makanan.",
+      logoUrl: "https://example.test/logo.png",
+      email: "CONTACT@EXAMPLE.TEST",
+      phone: "+62 812-3456-7890",
+      website: "https://example.test",
+      address: "Jalan Contoh No. 10",
+      city: "Bandung",
+      province: "Jawa Barat",
+      postalCode: "40123",
+      currency: "idr",
+      timezone: "Asia/Makassar",
+    });
   assert.equal(updated.status, 200);
   assert.equal(updated.body.data.organization.name, "Updated Gawen");
+  assert.equal(updated.body.data.organization.businessType, "Cafe");
+  assert.equal(updated.body.data.organization.description, "Kedai kopi dan makanan.");
+  assert.equal(updated.body.data.organization.logoUrl, "https://example.test/logo.png");
+  assert.equal(updated.body.data.organization.email, "contact@example.test");
+  assert.equal(updated.body.data.organization.phone, "+62 812-3456-7890");
+  assert.equal(updated.body.data.organization.website, "https://example.test");
+  assert.equal(updated.body.data.organization.address, "Jalan Contoh No. 10");
+  assert.equal(updated.body.data.organization.city, "Bandung");
+  assert.equal(updated.body.data.organization.province, "Jawa Barat");
+  assert.equal(updated.body.data.organization.postalCode, "40123");
+  assert.equal(updated.body.data.organization.currency, "IDR");
   assert.equal(updated.body.data.organization.timezone, "Asia/Makassar");
+
+  const clearedOptionalFields = await fromIp(nextIp())(app)
+    .patch(organizationPath)
+    .set("Authorization", `Bearer ${owner.token}`)
+    .send({ businessType: "", email: null, phone: "   " });
+  assert.equal(clearedOptionalFields.status, 200);
+  assert.equal(clearedOptionalFields.body.data.organization.businessType, null);
+  assert.equal(clearedOptionalFields.body.data.organization.email, null);
+  assert.equal(clearedOptionalFields.body.data.organization.phone, null);
 
   const employeeUpdate = await fromIp(nextIp())(app)
     .patch(organizationPath)
@@ -1018,6 +1054,30 @@ test("organization endpoints scope reads to members and restrict updates to owne
     .set("Authorization", `Bearer ${owner.token}`)
     .send({ timezone: "Not/A_Timezone" });
   assert.equal(invalidTimezone.status, 400);
+
+  const invalidBusinessProfile = await fromIp(nextIp())(app)
+    .patch(organizationPath)
+    .set("Authorization", `Bearer ${owner.token}`)
+    .send({ email: "not-an-email" });
+  assert.equal(invalidBusinessProfile.status, 400);
+
+  const invalidUrl = await fromIp(nextIp())(app)
+    .patch(organizationPath)
+    .set("Authorization", `Bearer ${owner.token}`)
+    .send({ website: "javascript:alert(1)" });
+  assert.equal(invalidUrl.status, 400);
+
+  const invalidLogoUrl = await fromIp(nextIp())(app)
+    .patch(organizationPath)
+    .set("Authorization", `Bearer ${owner.token}`)
+    .send({ logoUrl: "ftp://example.test/logo.png" });
+  assert.equal(invalidLogoUrl.status, 400);
+
+  const invalidCurrency = await fromIp(nextIp())(app)
+    .patch(organizationPath)
+    .set("Authorization", `Bearer ${owner.token}`)
+    .send({ currency: "IDRP" });
+  assert.equal(invalidCurrency.status, 400);
 
   const emptyUpdate = await fromIp(nextIp())(app)
     .patch(organizationPath)
