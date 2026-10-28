@@ -37,13 +37,6 @@ export const signIn: RequestHandler = validateBody(
   },
 );
 
-export const profile: RequestHandler = (req, res, next) => {
-  if (!req.auth) {
-    return next(new HttpError(401, "Autentikasi diperlukan."));
-  }
-  res.status(200).json({ status: "ok", data: { user: req.auth.user } });
-};
-
 export const logout: RequestHandler = async (req, res, next) => {
   if (!req.auth) {
     return next(new HttpError(401, "Autentikasi diperlukan."));

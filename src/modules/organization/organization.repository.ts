@@ -17,6 +17,7 @@ const organizationFields = {
   postalCode: true,
   currency: true,
   timezone: true,
+  setupCompletedAt: true,
   createdAt: true,
   updatedAt: true,
 } as const;
@@ -51,9 +52,41 @@ export function updateOrganization(input: {
       return { result: "not-owner" as const };
     }
 
+    const currentOrganization = await transaction.organization.findUnique({
+      where: { id: input.organizationId },
+      select: {
+        name: true,
+        businessType: true,
+        setupCompletedAt: true,
+      },
+    });
+    if (!currentOrganization) {
+      return { result: "missing" as const };
+    }
+
+    const nextName = input.data.name ?? currentOrganization.name;
+    const nextBusinessType =
+      input.data.businessType === undefined
+        ? currentOrganization.businessType
+        : input.data.businessType;
+    if (
+      currentOrganization.setupCompletedAt &&
+      (!nextBusinessType || !nextName.trim())
+    ) {
+      return { result: "invalid-profile" as const };
+    }
+
+    const setupCompletedAt =
+      currentOrganization.setupCompletedAt ??
+      (nextName.trim() && nextBusinessType?.trim()
+        ? new Date()
+        : null);
     const organization = await transaction.organization.update({
       where: { id: input.organizationId },
-      data: input.data,
+      data: {
+        ...input.data,
+        ...(setupCompletedAt ? { setupCompletedAt } : {}),
+      },
       select: organizationFields,
     });
 

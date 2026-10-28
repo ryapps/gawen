@@ -156,6 +156,7 @@ model Organization {
   postalCode       String?
   currency         String   @default("IDR")
   timezone         String   @default("Asia/Jakarta")
+  setupCompletedAt DateTime?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 

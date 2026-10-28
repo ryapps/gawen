@@ -3,6 +3,7 @@ import { env } from "./config/env.js";
 import authRoutes from "./modules/auth/auth.routes.js";
 import employeeRoutes from "./modules/employees/employees.routes.js";
 import organizationRoutes from "./modules/organization/organization.routes.js";
+import userRoutes from "./modules/user/user.routes.js";
 import healthRoutes from "./health.js";
 import errorHandler from "./middlewares/error.middleware.js";
 
@@ -13,6 +14,7 @@ app.use(express.json({ limit: "16kb" }));
 
 app.use("/health", healthRoutes);
 app.use("/api/auth", authRoutes);
+app.use("/api/users", userRoutes);
 app.use("/api/organizations", organizationRoutes);
 app.use("/api/employees", employeeRoutes);
 

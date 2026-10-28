@@ -20,7 +20,6 @@ router.post(
   createAuthRateLimiter("login", 10, 15 * 60 * 1000),
   authController.signIn,
 );
-router.get("/me", requireAuth, authController.profile);
 router.post("/logout", requireAuth, authController.logout);
 
 export default router;

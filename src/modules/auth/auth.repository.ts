@@ -7,7 +7,10 @@ import type {
 } from "./auth.validation.js";
 
 export async function createOwnerAccount(
-  input: Pick<RegisterOwnerInput, "name" | "email" | "organizationName">,
+  input: Pick<
+    RegisterOwnerInput,
+    "name" | "email" | "organizationName" | "phone"
+  >,
   passwordHash: string,
 ) {
   return prisma.$transaction(async (transaction) => {
@@ -16,12 +19,29 @@ export async function createOwnerAccount(
         name: input.name,
         email: input.email,
         passwordHash,
+        phone: input.phone ?? null,
       },
       select: { id: true, name: true, email: true, phone: true },
     });
     const organization = await transaction.organization.create({
       data: { name: input.organizationName },
-      select: { id: true, name: true, timezone: true },
+      select: {
+        id: true,
+        name: true,
+        timezone: true,
+        businessType: true,
+        description: true,
+        logoUrl: true,
+        email: true,
+        phone: true,
+        website: true,
+        address: true,
+        city: true,
+        province: true,
+        postalCode: true,
+        currency: true,
+        setupCompletedAt: true,
+      },
     });
     const membership = await transaction.organizationMembership.create({
       data: {
@@ -39,7 +59,7 @@ export async function createOwnerAccount(
 }
 
 export async function createEmployeeAccount(
-  input: Pick<RegisterEmployeeInput, "name" | "email">,
+  input: Pick<RegisterEmployeeInput, "name" | "email" | "phone">,
   passwordHash: string,
 ) {
   return prisma.user.create({
@@ -47,6 +67,7 @@ export async function createEmployeeAccount(
       name: input.name,
       email: input.email,
       passwordHash,
+      phone: input.phone ?? null,
     },
     select: {
       id: true,
@@ -58,7 +79,23 @@ export async function createEmployeeAccount(
           id: true,
           role: true,
           organization: {
-            select: { id: true, name: true, timezone: true },
+            select: {
+              id: true,
+              name: true,
+              timezone: true,
+              businessType: true,
+              description: true,
+              logoUrl: true,
+              email: true,
+              phone: true,
+              website: true,
+              address: true,
+              city: true,
+              province: true,
+              postalCode: true,
+              currency: true,
+              setupCompletedAt: true,
+            },
           },
         },
       },
@@ -80,7 +117,23 @@ export function findLoginUser(input: LoginInput) {
           id: true,
           role: true,
           organization: {
-            select: { id: true, name: true, timezone: true },
+            select: {
+              id: true,
+              name: true,
+              timezone: true,
+              businessType: true,
+              description: true,
+              logoUrl: true,
+              email: true,
+              phone: true,
+              website: true,
+              address: true,
+              city: true,
+              province: true,
+              postalCode: true,
+              currency: true,
+              setupCompletedAt: true,
+            },
           },
         },
       },

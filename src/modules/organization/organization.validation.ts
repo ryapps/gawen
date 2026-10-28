@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { indonesianPhoneSchema } from "../../lib/indonesian-phone.js";
 
 function nullableText(maximumLength: number) {
   return z
@@ -49,7 +50,7 @@ export const updateOrganizationSchema = z
       .pipe(z.string().email().nullable())
       .nullable()
       .optional(),
-    phone: nullableText(32),
+    phone: indonesianPhoneSchema.optional(),
     website: z
       .string()
       .trim()

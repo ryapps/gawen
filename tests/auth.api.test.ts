@@ -8,6 +8,7 @@ import app from "../src/app.js";
 import { requireAuth, requireOrganizationRole } from "../src/middlewares/auth.middleware.js";
 import errorHandler from "../src/middlewares/error.middleware.js";
 import prisma from "../src/lib/prisma.js";
+import { indonesianPhoneSchema } from "../src/lib/indonesian-phone.js";
 import {
   loginSchema,
   registerEmployeeSchema,
@@ -66,6 +67,33 @@ test("password validation requires 8 characters without extra complexity rules",
   );
 });
 
+test("Indonesian phone numbers normalize to a single +62 prefix and reject invalid or repeated prefixes", () => {
+  for (const [input, expected] of [
+    ["81234567890", "+6281234567890"],
+    ["0812 3456 7890", "+6281234567890"],
+    ["62-812-3456-7890", "+6281234567890"],
+    ["+62 (812) 3456-7890", "+6281234567890"],
+    ["021 555 1234", "+62215551234"],
+  ]) {
+    assert.equal(indonesianPhoneSchema.parse(input), expected);
+  }
+
+  for (const input of [
+    "+62 0812 3456 7890",
+    "+62 62 812 3456 7890",
+    "6262 812 3456 7890",
+    "0062 812 3456 7890",
+    "+1 812 3456 7890",
+    "123",
+    "0812ABC",
+  ]) {
+    assert.equal(indonesianPhoneSchema.safeParse(input).success, false, input);
+  }
+
+  assert.equal(indonesianPhoneSchema.parse(""), null);
+  assert.equal(indonesianPhoneSchema.parse(null), null);
+});
+
 type TestUser = {
   id: string;
   name: string;
@@ -112,12 +140,14 @@ function submitOwnerRegistration(
   email = `owner-${randomUUID()}@example.test`,
   ip = nextIp(),
   password = TEST_PASSWORD,
+  phone?: string,
 ) {
   return fromIp(ip)(app).post("/api/auth/register").send({
     name: "Test Owner",
     email,
     password,
     organizationName: "Test Organization",
+    ...(phone === undefined ? {} : { phone }),
   });
 }
 
@@ -125,11 +155,13 @@ function submitEmployeeRegistration(
   email = `employee-${randomUUID()}@example.test`,
   ip = nextIp(),
   password = TEST_PASSWORD,
+  phone?: string,
 ) {
   return fromIp(ip)(app).post("/api/auth/register/employee").send({
     name: "Test Employee",
     email,
     password,
+    ...(phone === undefined ? {} : { phone }),
   });
 }
 
@@ -371,6 +403,54 @@ test("registration validates input and rejects client-controlled role or organiz
       organizationId: "attacker-controlled",
     });
   assert.equal(forgedRole.status, 400);
+
+  const invalidPhone = await fromIp(nextIp())(app)
+    .post("/api/auth/register")
+    .send({
+      name: "Test Owner",
+      email: `invalid-phone-${randomUUID()}@example.test`,
+      password: TEST_PASSWORD,
+      organizationName: "Test Organization",
+      phone: "+62 0812 3456 7890",
+    });
+  assert.equal(invalidPhone.status, 400);
+});
+
+test("owner and employee registration persist valid phone inputs in canonical +62 format", async () => {
+  const ownerEmail = `phone-owner-${randomUUID()}@example.test`;
+  const ownerSignup = await submitOwnerRegistration(
+    ownerEmail,
+    nextIp(),
+    TEST_PASSWORD,
+    "0812 3456 7890",
+  );
+  assert.equal(ownerSignup.status, 202);
+  const owner = await prisma.user.findUniqueOrThrow({
+    where: { email: ownerEmail },
+    select: { id: true, phone: true },
+  });
+  userIds.add(owner.id);
+  assert.equal(owner.phone, "+6281234567890");
+  const ownerMembership = await prisma.organizationMembership.findFirstOrThrow({
+    where: { userId: owner.id, role: "OWNER" },
+    select: { organizationId: true },
+  });
+  organizationIds.add(ownerMembership.organizationId);
+
+  const employeeEmail = `phone-employee-${randomUUID()}@example.test`;
+  const employeeSignup = await submitEmployeeRegistration(
+    employeeEmail,
+    nextIp(),
+    TEST_PASSWORD,
+    "62-812-3456-7891",
+  );
+  assert.equal(employeeSignup.status, 202);
+  const employee = await prisma.user.findUniqueOrThrow({
+    where: { email: employeeEmail },
+    select: { id: true, phone: true },
+  });
+  userIds.add(employee.id);
+  assert.equal(employee.phone, "+6281234567891");
 });
 
 test("registration creates an owner, organization, and session without exposing a password hash", async () => {
@@ -415,7 +495,7 @@ test("employee self-registration creates an authenticated account without organi
   assert.equal("businessJoinCode" in response.body.data, false);
 
   const profile = await fromIp(nextIp())(app)
-    .get("/api/auth/me")
+    .get("/api/users/me")
     .set("Authorization", `Bearer ${employee.token}`);
   assert.equal(profile.status, 200);
   assert.deepEqual(profile.body.data.user.memberships, []);
@@ -478,7 +558,7 @@ test("business-code join creates a pending request without granting access; owne
   assert.equal(approved.body.data.status, "APPROVED");
 
   const afterApproval = await fromIp(nextIp())(app)
-    .get("/api/auth/me")
+    .get("/api/users/me")
     .set("Authorization", employeeAuth);
   assert.equal(afterApproval.body.data.user.memberships[0].role, "EMPLOYEE");
   assert.equal(afterApproval.body.data.user.memberships[0].organization.id, owner.organizationId);
@@ -707,7 +787,7 @@ test("owner invitations accept only the intended account, create EMPLOYEE member
   assert.equal(accepted.status, 200);
 
   const profile = await fromIp(nextIp())(app)
-    .get("/api/auth/me")
+    .get("/api/users/me")
     .set("Authorization", `Bearer ${employee.token}`);
   assert.equal(profile.body.data.user.memberships[0].role, "EMPLOYEE");
   assert.equal(profile.body.data.user.memberships[0].organization.id, owner.organizationId);
@@ -855,7 +935,7 @@ test("profile requires a valid bearer session and logout revokes it", async () =
   const created = rememberUser(registered);
   const profileRequest = () =>
     fromIp(nextIp())(app)
-      .get("/api/auth/me")
+      .get("/api/users/me")
       .set("Authorization", `Bearer ${created.token}`);
 
   const profile = await profileRequest();
@@ -863,16 +943,67 @@ test("profile requires a valid bearer session and logout revokes it", async () =
   assert.equal(profile.body.data.user.id, created.userId);
   assert.equal("passwordHash" in profile.body.data.user, false);
 
-  const unauthenticated = await fromIp(nextIp())(app).get("/api/auth/me");
+  const unauthenticated = await fromIp(nextIp())(app).get("/api/users/me");
   const invalidToken = await fromIp(nextIp())(app)
-    .get("/api/auth/me")
+    .get("/api/users/me")
     .set("Authorization", "Bearer invalid");
   const malformedHeader = await fromIp(nextIp())(app)
-    .get("/api/auth/me")
+    .get("/api/users/me")
     .set("Authorization", `Token ${created.token}`);
   assert.equal(unauthenticated.status, 401);
   assert.equal(invalidToken.status, 401);
   assert.equal(malformedHeader.status, 401);
+
+  const oldAuthProfileRoute = await fromIp(nextIp())(app)
+    .get("/api/auth/me")
+    .set("Authorization", `Bearer ${created.token}`);
+  assert.equal(oldAuthProfileRoute.status, 404);
+
+  const updatedProfile = await fromIp(nextIp())(app)
+    .patch("/api/users/me")
+    .set("Authorization", `Bearer ${created.token}`)
+    .send({ name: "Updated Profile", phone: "812 3456 7890" });
+  assert.equal(updatedProfile.status, 200);
+  assert.equal(updatedProfile.body.data.user.id, created.userId);
+  assert.equal(updatedProfile.body.data.user.name, "Updated Profile");
+  assert.equal(updatedProfile.body.data.user.phone, "+6281234567890");
+  assert.equal("passwordHash" in updatedProfile.body.data.user, false);
+
+  const profileAfterUpdate = await profileRequest();
+  assert.equal(profileAfterUpdate.body.data.user.name, "Updated Profile");
+  assert.equal(profileAfterUpdate.body.data.user.phone, "+6281234567890");
+
+  const legacyPhoneUpdate = await fromIp(nextIp())(app)
+    .patch("/api/users/me")
+    .set("Authorization", `Bearer ${created.token}`)
+    .send({ phone: "0812-3456-7891" });
+  assert.equal(legacyPhoneUpdate.status, 200);
+  assert.equal(legacyPhoneUpdate.body.data.user.phone, "+6281234567891");
+
+  const invalidProfileUpdate = await fromIp(nextIp())(app)
+    .patch("/api/users/me")
+    .set("Authorization", `Bearer ${created.token}`)
+    .send({ email: "attacker@example.test" });
+  assert.equal(invalidProfileUpdate.status, 400);
+
+  const repeatedPrefix = await fromIp(nextIp())(app)
+    .patch("/api/users/me")
+    .set("Authorization", `Bearer ${created.token}`)
+    .send({ phone: "+62 0812 3456 7890" });
+  assert.equal(repeatedPrefix.status, 400);
+
+  const emptyProfileUpdate = await fromIp(nextIp())(app)
+    .patch("/api/users/me")
+    .set("Authorization", `Bearer ${created.token}`)
+    .send({});
+  assert.equal(emptyProfileUpdate.status, 400);
+
+  const clearPhone = await fromIp(nextIp())(app)
+    .patch("/api/users/me")
+    .set("Authorization", `Bearer ${created.token}`)
+    .send({ phone: "" });
+  assert.equal(clearPhone.status, 200);
+  assert.equal(clearPhone.body.data.user.phone, null);
 
   const logout = await fromIp(nextIp())(app)
     .post("/api/auth/logout")
@@ -984,6 +1115,7 @@ test("organization endpoints scope reads to members and restrict updates to owne
   assert.equal("businessCodeHash" in ownerRead.body.data.organization, false);
   assert.equal(ownerRead.body.data.organization.currency, "IDR");
   assert.equal(ownerRead.body.data.organization.businessType, null);
+  assert.equal(ownerRead.body.data.organization.setupCompletedAt, null);
 
   const employeeRead = await fromIp(nextIp())(app)
     .get(organizationPath)
@@ -1004,7 +1136,7 @@ test("organization endpoints scope reads to members and restrict updates to owne
       description: "Kedai kopi dan makanan.",
       logoUrl: "https://example.test/logo.png",
       email: "CONTACT@EXAMPLE.TEST",
-      phone: "+62 812-3456-7890",
+      phone: "0812 3456 7890",
       website: "https://example.test",
       address: "Jalan Contoh No. 10",
       city: "Bandung",
@@ -1019,7 +1151,7 @@ test("organization endpoints scope reads to members and restrict updates to owne
   assert.equal(updated.body.data.organization.description, "Kedai kopi dan makanan.");
   assert.equal(updated.body.data.organization.logoUrl, "https://example.test/logo.png");
   assert.equal(updated.body.data.organization.email, "contact@example.test");
-  assert.equal(updated.body.data.organization.phone, "+62 812-3456-7890");
+  assert.equal(updated.body.data.organization.phone, "+6281234567890");
   assert.equal(updated.body.data.organization.website, "https://example.test");
   assert.equal(updated.body.data.organization.address, "Jalan Contoh No. 10");
   assert.equal(updated.body.data.organization.city, "Bandung");
@@ -1027,13 +1159,33 @@ test("organization endpoints scope reads to members and restrict updates to owne
   assert.equal(updated.body.data.organization.postalCode, "40123");
   assert.equal(updated.body.data.organization.currency, "IDR");
   assert.equal(updated.body.data.organization.timezone, "Asia/Makassar");
+  assert.ok(updated.body.data.organization.setupCompletedAt);
+
+  const profileAfterSetup = await fromIp(nextIp())(app)
+    .get("/api/users/me")
+    .set("Authorization", `Bearer ${owner.token}`);
+  assert.equal(profileAfterSetup.status, 200);
+  assert.equal(
+    profileAfterSetup.body.data.user.memberships[0].organization.businessType,
+    "Cafe",
+  );
+  assert.equal(
+    profileAfterSetup.body.data.user.memberships[0].organization.setupCompletedAt,
+    updated.body.data.organization.setupCompletedAt,
+  );
+
+  const clearingRequiredBusinessType = await fromIp(nextIp())(app)
+    .patch(organizationPath)
+    .set("Authorization", `Bearer ${owner.token}`)
+    .send({ businessType: "" });
+  assert.equal(clearingRequiredBusinessType.status, 400);
 
   const clearedOptionalFields = await fromIp(nextIp())(app)
     .patch(organizationPath)
     .set("Authorization", `Bearer ${owner.token}`)
-    .send({ businessType: "", email: null, phone: "   " });
+    .send({ email: null, phone: "   " });
   assert.equal(clearedOptionalFields.status, 200);
-  assert.equal(clearedOptionalFields.body.data.organization.businessType, null);
+  assert.equal(clearedOptionalFields.body.data.organization.businessType, "Cafe");
   assert.equal(clearedOptionalFields.body.data.organization.email, null);
   assert.equal(clearedOptionalFields.body.data.organization.phone, null);
 
@@ -1078,6 +1230,12 @@ test("organization endpoints scope reads to members and restrict updates to owne
     .set("Authorization", `Bearer ${owner.token}`)
     .send({ currency: "IDRP" });
   assert.equal(invalidCurrency.status, 400);
+
+  const invalidOrganizationPhone = await fromIp(nextIp())(app)
+    .patch(organizationPath)
+    .set("Authorization", `Bearer ${owner.token}`)
+    .send({ phone: "+62 6281234567890" });
+  assert.equal(invalidOrganizationPhone.status, 400);
 
   const emptyUpdate = await fromIp(nextIp())(app)
     .patch(organizationPath)

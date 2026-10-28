@@ -29,6 +29,15 @@ export async function updateOrganization(
   if (result.result === "not-owner") {
     throw new HttpError(403, "Anda tidak memiliki akses.");
   }
+  if (result.result === "missing") {
+    throw new HttpError(404, "Organisasi tidak tersedia.");
+  }
+  if (result.result === "invalid-profile") {
+    throw new HttpError(
+      400,
+      "Jenis usaha wajib diisi setelah pengaturan usaha selesai.",
+    );
+  }
 
   return result.organization;
 }
