@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { indonesianPhoneSchema } from "../../lib/indonesian-phone.js";
 
 function nullableText(maximumLength: number) {
   return z
@@ -49,7 +50,7 @@ export const updateOrganizationSchema = z
       .pipe(z.string().email().nullable())
       .nullable()
       .optional(),
-    phone: nullableText(32),
+    phone: indonesianPhoneSchema.optional(),
     website: z
       .string()
       .trim()
@@ -70,6 +71,7 @@ export const updateOrganizationSchema = z
       .max(64)
       .refine(isSupportedTimeZone)
       .optional(),
+    setupStep: z.number().int().min(0).max(4).optional(),
   })
   .strict()
   .refine((value) => Object.keys(value).length > 0);

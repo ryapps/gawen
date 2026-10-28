@@ -15,6 +15,7 @@ const organizationMemberSelect = {
       name: true,
       email: true,
       phone: true,
+      photoProfile: true,
     },
   },
 } as const;
@@ -131,7 +132,14 @@ export function findPendingJoinRequests(organizationId: string) {
     select: {
       id: true,
       createdAt: true,
-      user: { select: { id: true, name: true, email: true } },
+      user: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          photoProfile: true,
+        },
+      },
     },
   });
 }

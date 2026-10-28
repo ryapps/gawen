@@ -1,0 +1,2 @@
+ALTER TABLE "Organization"
+ADD COLUMN "setupStep" INTEGER NOT NULL DEFAULT 0;

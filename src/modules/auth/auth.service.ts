@@ -39,6 +39,7 @@ export async function registerOwner(input: RegisterOwnerInput) {
         name: input.name,
         email: input.email,
         organizationName: input.organizationName,
+        phone: input.phone,
       },
       passwordHash,
     );
@@ -55,7 +56,7 @@ export async function registerEmployee(input: RegisterEmployeeInput) {
 
   try {
     await authRepository.createEmployeeAccount(
-      { name: input.name, email: input.email },
+      { name: input.name, email: input.email, phone: input.phone },
       passwordHash,
     );
   } catch (error) {
