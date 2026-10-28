@@ -905,6 +905,7 @@ test("login accepts valid credentials and returns a generic error for invalid cr
     });
   assert.equal(validLogin.status, 200);
   assert.equal("passwordHash" in validLogin.body.data.user, false);
+  assert.equal(validLogin.body.data.user.photoProfile, null);
 
   const wrongPassword = await fromIp(nextIp())(app)
     .post("/api/auth/login")
@@ -941,6 +942,7 @@ test("profile requires a valid bearer session and logout revokes it", async () =
   const profile = await profileRequest();
   assert.equal(profile.status, 200);
   assert.equal(profile.body.data.user.id, created.userId);
+  assert.equal(profile.body.data.user.photoProfile, null);
   assert.equal("passwordHash" in profile.body.data.user, false);
 
   const unauthenticated = await fromIp(nextIp())(app).get("/api/users/me");
@@ -962,16 +964,52 @@ test("profile requires a valid bearer session and logout revokes it", async () =
   const updatedProfile = await fromIp(nextIp())(app)
     .patch("/api/users/me")
     .set("Authorization", `Bearer ${created.token}`)
-    .send({ name: "Updated Profile", phone: "812 3456 7890" });
+    .send({
+      name: "Updated Profile",
+      phone: "812 3456 7890",
+      photoProfile: "https://cdn.example.test/profiles/user.png",
+    });
   assert.equal(updatedProfile.status, 200);
   assert.equal(updatedProfile.body.data.user.id, created.userId);
   assert.equal(updatedProfile.body.data.user.name, "Updated Profile");
   assert.equal(updatedProfile.body.data.user.phone, "+6281234567890");
+  assert.equal(
+    updatedProfile.body.data.user.photoProfile,
+    "https://cdn.example.test/profiles/user.png",
+  );
   assert.equal("passwordHash" in updatedProfile.body.data.user, false);
 
   const profileAfterUpdate = await profileRequest();
   assert.equal(profileAfterUpdate.body.data.user.name, "Updated Profile");
   assert.equal(profileAfterUpdate.body.data.user.phone, "+6281234567890");
+  assert.equal(
+    profileAfterUpdate.body.data.user.photoProfile,
+    "https://cdn.example.test/profiles/user.png",
+  );
+  const storedPhoto = await prisma.user.findUniqueOrThrow({
+    where: { id: created.userId },
+    select: { photoProfile: true },
+  });
+  assert.equal(storedPhoto.photoProfile, "https://cdn.example.test/profiles/user.png");
+
+  const invalidPhotoProtocol = await fromIp(nextIp())(app)
+    .patch("/api/users/me")
+    .set("Authorization", `Bearer ${created.token}`)
+    .send({ photoProfile: "javascript:alert(1)" });
+  assert.equal(invalidPhotoProtocol.status, 400);
+
+  const invalidPhotoUrl = await fromIp(nextIp())(app)
+    .patch("/api/users/me")
+    .set("Authorization", `Bearer ${created.token}`)
+    .send({ photoProfile: "not-a-url" });
+  assert.equal(invalidPhotoUrl.status, 400);
+
+  const clearedPhotoProfile = await fromIp(nextIp())(app)
+    .patch("/api/users/me")
+    .set("Authorization", `Bearer ${created.token}`)
+    .send({ photoProfile: "" });
+  assert.equal(clearedPhotoProfile.status, 200);
+  assert.equal(clearedPhotoProfile.body.data.user.photoProfile, null);
 
   const legacyPhoneUpdate = await fromIp(nextIp())(app)
     .patch("/api/users/me")
@@ -1188,6 +1226,35 @@ test("organization endpoints scope reads to members and restrict updates to owne
   assert.equal(clearedOptionalFields.body.data.organization.businessType, "Cafe");
   assert.equal(clearedOptionalFields.body.data.organization.email, null);
   assert.equal(clearedOptionalFields.body.data.organization.phone, null);
+
+  const incompleteSetup = await fromIp(nextIp())(app)
+    .post(`${organizationPath}/setup/complete`)
+    .set("Authorization", `Bearer ${owner.token}`);
+  assert.equal(incompleteSetup.status, 400);
+
+  const savedProgress = await fromIp(nextIp())(app)
+    .patch(organizationPath)
+    .set("Authorization", `Bearer ${owner.token}`)
+    .send({ setupStep: 4 });
+  assert.equal(savedProgress.status, 200);
+  assert.equal(savedProgress.body.data.organization.setupStep, 4);
+  const updatedOwnerProfile = await fromIp(nextIp())(app)
+    .patch("/api/users/me")
+    .set("Authorization", `Bearer ${owner.token}`)
+    .send({ phone: "+6281234567890" });
+  assert.equal(updatedOwnerProfile.status, 200);
+
+  const employeeSetupCompletion = await fromIp(nextIp())(app)
+    .post(`${organizationPath}/setup/complete`)
+    .set("Authorization", `Bearer ${employee.token}`);
+  assert.equal(employeeSetupCompletion.status, 403);
+
+  const completedSetup = await fromIp(nextIp())(app)
+    .post(`${organizationPath}/setup/complete`)
+    .set("Authorization", `Bearer ${owner.token}`);
+  assert.equal(completedSetup.status, 200);
+  assert.ok(completedSetup.body.data.organization.setupCompletedAt);
+  assert.equal(completedSetup.body.data.organization.setupStep, 5);
 
   const employeeUpdate = await fromIp(nextIp())(app)
     .patch(organizationPath)

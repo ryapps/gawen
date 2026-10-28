@@ -39,6 +39,15 @@ export const updateOrganization: RequestHandler = validateBody(
       getOrganizationId(req),
       input,
     );
+
     res.status(200).json({ status: "ok", data: { organization } });
   },
 );
+
+export const completeOrganizationSetup: RequestHandler = async (req, res) => {
+  const organization = await organizationService.completeOrganizationSetup(
+    getAuth(req),
+    getOrganizationId(req),
+  );
+  res.status(200).json({ status: "ok", data: { organization } });
+};

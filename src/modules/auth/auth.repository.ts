@@ -21,7 +21,13 @@ export async function createOwnerAccount(
         passwordHash,
         phone: input.phone ?? null,
       },
-      select: { id: true, name: true, email: true, phone: true },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        photoProfile: true,
+      },
     });
     const organization = await transaction.organization.create({
       data: { name: input.organizationName },
@@ -41,6 +47,7 @@ export async function createOwnerAccount(
         postalCode: true,
         currency: true,
         setupCompletedAt: true,
+        setupStep: true,
       },
     });
     const membership = await transaction.organizationMembership.create({
@@ -74,6 +81,7 @@ export async function createEmployeeAccount(
       name: true,
       email: true,
       phone: true,
+      photoProfile: true,
       memberships: {
         select: {
           id: true,
@@ -95,6 +103,7 @@ export async function createEmployeeAccount(
               postalCode: true,
               currency: true,
               setupCompletedAt: true,
+              setupStep: true,
             },
           },
         },
@@ -111,6 +120,7 @@ export function findLoginUser(input: LoginInput) {
       name: true,
       email: true,
       phone: true,
+      photoProfile: true,
       passwordHash: true,
       memberships: {
         select: {
@@ -133,6 +143,7 @@ export function findLoginUser(input: LoginInput) {
               postalCode: true,
               currency: true,
               setupCompletedAt: true,
+              setupStep: true,
             },
           },
         },

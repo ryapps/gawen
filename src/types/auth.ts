@@ -27,6 +27,7 @@ export interface AuthUser {
   name: string;
   email: string;
   phone: string | null;
+  photoProfile: string | null;
   memberships: AuthMembership[];
 }
 

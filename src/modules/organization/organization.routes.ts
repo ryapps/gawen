@@ -15,5 +15,10 @@ router.patch(
   requireOrganizationRole("OWNER"),
   organizationController.updateOrganization,
 );
+router.post(
+  "/:organizationId/setup/complete",
+  requireOrganizationRole("OWNER"),
+  organizationController.completeOrganizationSetup,
+);
 
 export default router;

@@ -38,6 +38,29 @@ export async function updateOrganization(
       "Jenis usaha wajib diisi setelah pengaturan usaha selesai.",
     );
   }
+  if (result.result === "invalid-step") {
+    throw new HttpError(400, "Langkah onboarding harus disimpan secara berurutan.");
+  }
 
+  return result.organization;
+}
+
+export async function completeOrganizationSetup(
+  auth: AuthContext,
+  organizationId: string,
+) {
+  const result = await organizationRepository.completeOrganizationSetup({
+    organizationId,
+    userId: auth.user.id,
+  });
+  if (result.result === "not-owner") {
+    throw new HttpError(403, "Anda tidak memiliki akses.");
+  }
+  if (result.result === "missing") {
+    throw new HttpError(404, "Organisasi tidak tersedia.");
+  }
+  if (result.result === "invalid-profile") {
+    throw new HttpError(400, "Nama dan jenis usaha wajib diisi.");
+  }
   return result.organization;
 }

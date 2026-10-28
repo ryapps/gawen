@@ -6,6 +6,7 @@ const userProfileSelect = {
   name: true,
   email: true,
   phone: true,
+  photoProfile: true,
   memberships: {
     select: {
       id: true,
@@ -27,6 +28,7 @@ const userProfileSelect = {
           postalCode: true,
           currency: true,
           setupCompletedAt: true,
+          setupStep: true,
         },
       },
     },

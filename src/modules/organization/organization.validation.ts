@@ -71,6 +71,7 @@ export const updateOrganizationSchema = z
       .max(64)
       .refine(isSupportedTimeZone)
       .optional(),
+    setupStep: z.number().int().min(0).max(4).optional(),
   })
   .strict()
   .refine((value) => Object.keys(value).length > 0);

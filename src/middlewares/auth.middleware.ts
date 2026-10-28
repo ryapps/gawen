@@ -27,6 +27,7 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
           name: true,
           email: true,
           phone: true,
+          photoProfile: true,
           memberships: {
             select: {
               id: true,
@@ -48,6 +49,7 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
                   postalCode: true,
                   currency: true,
                   setupCompletedAt: true,
+                  setupStep: true,
                 },
               },
             },
