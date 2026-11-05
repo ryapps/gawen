@@ -1,4 +1,5 @@
 import type { ErrorRequestHandler } from "express";
+import multer from "multer";
 import { HttpError } from "../lib/http-error.js";
 
 function isPrismaUniqueConstraintError(
@@ -12,12 +13,7 @@ function isPrismaUniqueConstraintError(
   );
 }
 
-const errorHandler: ErrorRequestHandler = (
-  err,
-  _req,
-  res,
-  _next,
-) => {
+const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   let statusCode = 500;
   let message = "Terjadi kesalahan pada server.";
 
@@ -27,6 +23,12 @@ const errorHandler: ErrorRequestHandler = (
   } else if (isPrismaUniqueConstraintError(err)) {
     statusCode = 409;
     message = "Data yang diminta sudah terdaftar.";
+  } else if (err instanceof multer.MulterError) {
+    statusCode = err.code === "LIMIT_FILE_SIZE" ? 413 : 400;
+    message =
+      err.code === "LIMIT_FILE_SIZE"
+        ? "Ukuran file maksimal 5 MB."
+        : "File upload tidak valid.";
   } else if (
     typeof err === "object" &&
     err !== null &&
@@ -41,8 +43,7 @@ const errorHandler: ErrorRequestHandler = (
   }
 
   if (statusCode >= 500) {
-    const errorName =
-      err instanceof Error ? err.name : "Unknown request error";
+    const errorName = err instanceof Error ? err.name : "Unknown request error";
     console.error(`Request failed: ${errorName}`);
   }
 

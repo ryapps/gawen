@@ -28,3 +28,13 @@ export const updateMe: RequestHandler = validateBody(
     res.status(200).json({ status: "ok", data: { user } });
   },
 );
+
+export const uploadAvatar: RequestHandler = async (req, res) => {
+  const auth = getAuth(req as AuthenticatedRequest);
+  const file = (req as AuthenticatedRequest & { file?: Express.Multer.File })
+    .file;
+  if (!file)
+    throw new HttpError(400, "Pilih file foto profil terlebih dahulu.");
+  const user = await userService.uploadAvatar(auth, file.buffer);
+  res.status(200).json({ status: "ok", data: { user } });
+};
