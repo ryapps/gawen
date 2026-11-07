@@ -1170,7 +1170,7 @@ test("organization endpoints scope reads to members and restrict updates to owne
     .set("Authorization", `Bearer ${owner.token}`)
     .send({
       name: "Updated Gawen",
-      businessType: "Cafe",
+      businessType: "FOOD_AND_BEVERAGE",
       description: "Kedai kopi dan makanan.",
       logoUrl: "https://example.test/logo.png",
       email: "CONTACT@EXAMPLE.TEST",
@@ -1179,13 +1179,24 @@ test("organization endpoints scope reads to members and restrict updates to owne
       address: "Jalan Contoh No. 10",
       city: "Bandung",
       province: "Jawa Barat",
+      provinceCode: "32",
+      provinceName: "Jawa Barat",
+      regencyCode: "32.73",
+      regencyName: "Kota Bandung",
+      districtCode: "32.73.01",
+      districtName: "Sukasari",
+      villageCode: "32.73.01.1001",
+      villageName: "Sukarasa",
       postalCode: "40123",
       currency: "idr",
       timezone: "Asia/Makassar",
     });
   assert.equal(updated.status, 200);
   assert.equal(updated.body.data.organization.name, "Updated Gawen");
-  assert.equal(updated.body.data.organization.businessType, "Cafe");
+  assert.equal(
+    updated.body.data.organization.businessType,
+    "FOOD_AND_BEVERAGE",
+  );
   assert.equal(updated.body.data.organization.description, "Kedai kopi dan makanan.");
   assert.equal(updated.body.data.organization.logoUrl, "https://example.test/logo.png");
   assert.equal(updated.body.data.organization.email, "contact@example.test");
@@ -1194,6 +1205,14 @@ test("organization endpoints scope reads to members and restrict updates to owne
   assert.equal(updated.body.data.organization.address, "Jalan Contoh No. 10");
   assert.equal(updated.body.data.organization.city, "Bandung");
   assert.equal(updated.body.data.organization.province, "Jawa Barat");
+  assert.equal(updated.body.data.organization.provinceCode, "32");
+  assert.equal(updated.body.data.organization.provinceName, "Jawa Barat");
+  assert.equal(updated.body.data.organization.regencyCode, "32.73");
+  assert.equal(updated.body.data.organization.regencyName, "Kota Bandung");
+  assert.equal(updated.body.data.organization.districtCode, "32.73.01");
+  assert.equal(updated.body.data.organization.districtName, "Sukasari");
+  assert.equal(updated.body.data.organization.villageCode, "32.73.01.1001");
+  assert.equal(updated.body.data.organization.villageName, "Sukarasa");
   assert.equal(updated.body.data.organization.postalCode, "40123");
   assert.equal(updated.body.data.organization.currency, "IDR");
   assert.equal(updated.body.data.organization.timezone, "Asia/Makassar");
@@ -1205,7 +1224,7 @@ test("organization endpoints scope reads to members and restrict updates to owne
   assert.equal(profileAfterSetup.status, 200);
   assert.equal(
     profileAfterSetup.body.data.user.memberships[0].organization.businessType,
-    "Cafe",
+    "FOOD_AND_BEVERAGE",
   );
   assert.equal(
     profileAfterSetup.body.data.user.memberships[0].organization.setupCompletedAt,
@@ -1218,12 +1237,30 @@ test("organization endpoints scope reads to members and restrict updates to owne
     .send({ businessType: "" });
   assert.equal(clearingRequiredBusinessType.status, 400);
 
+  const invalidRegionHierarchy = await fromIp(nextIp())(app)
+    .patch(organizationPath)
+    .set("Authorization", `Bearer ${owner.token}`)
+    .send({
+      districtCode: "31.74.07",
+      districtName: "Kebayoran Baru",
+    });
+  assert.equal(invalidRegionHierarchy.status, 400);
+
+  const invalidBusinessType = await fromIp(nextIp())(app)
+    .patch(organizationPath)
+    .set("Authorization", `Bearer ${owner.token}`)
+    .send({ businessType: "CAFE" });
+  assert.equal(invalidBusinessType.status, 400);
+
   const clearedOptionalFields = await fromIp(nextIp())(app)
     .patch(organizationPath)
     .set("Authorization", `Bearer ${owner.token}`)
     .send({ email: null, phone: "   " });
   assert.equal(clearedOptionalFields.status, 200);
-  assert.equal(clearedOptionalFields.body.data.organization.businessType, "Cafe");
+  assert.equal(
+    clearedOptionalFields.body.data.organization.businessType,
+    "FOOD_AND_BEVERAGE",
+  );
   assert.equal(clearedOptionalFields.body.data.organization.email, null);
   assert.equal(clearedOptionalFields.body.data.organization.phone, null);
 

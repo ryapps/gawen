@@ -15,7 +15,13 @@ export function validateBody<T>(
   return (req, res, next) => {
     const result = schema.safeParse(req.body);
     if (!result.success) {
-      return next(new HttpError(400, "Data permintaan tidak valid."));
+      const details = result.error.issues.map((issue) => ({
+        path: issue.path.join(".") || "body",
+        message: issue.message,
+      }));
+      return next(
+        new HttpError(400, "Data permintaan tidak valid.", details),
+      );
     }
 
     return Promise.resolve(handler(req, res, result.data)).catch(next);

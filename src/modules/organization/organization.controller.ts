@@ -44,6 +44,21 @@ export const updateOrganization: RequestHandler = validateBody(
   },
 );
 
+export const uploadOrganizationLogo: RequestHandler = async (req, res) => {
+  const file = (req as AuthenticatedRequest & { file?: Express.Multer.File })
+    .file;
+  if (!file) {
+    throw new HttpError(400, "Pilih file logo terlebih dahulu.");
+  }
+
+  const organization = await organizationService.uploadOrganizationLogoImage(
+    getAuth(req as AuthenticatedRequest),
+    getOrganizationId(req),
+    file.buffer,
+  );
+  res.status(200).json({ status: "ok", data: { organization } });
+};
+
 export const completeOrganizationSetup: RequestHandler = async (req, res) => {
   const organization = await organizationService.completeOrganizationSetup(
     getAuth(req),

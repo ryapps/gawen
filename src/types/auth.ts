@@ -1,4 +1,7 @@
-import type { OrganizationRole } from "../generated/prisma/enums.js";
+import type {
+  OrganizationBusinessType,
+  OrganizationRole,
+} from "../generated/prisma/enums.js";
 
 export interface AuthMembership {
   id: string;
@@ -7,7 +10,7 @@ export interface AuthMembership {
     id: string;
     name: string;
     timezone: string;
-    businessType: string | null;
+    businessType: OrganizationBusinessType | null;
     description: string | null;
     logoUrl: string | null;
     email: string | null;
@@ -16,6 +19,14 @@ export interface AuthMembership {
     address: string | null;
     city: string | null;
     province: string | null;
+    provinceCode: string | null;
+    provinceName: string | null;
+    regencyCode: string | null;
+    regencyName: string | null;
+    districtCode: string | null;
+    districtName: string | null;
+    villageCode: string | null;
+    villageName: string | null;
     postalCode: string | null;
     currency: string;
     setupCompletedAt: Date | null;

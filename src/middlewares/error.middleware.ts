@@ -16,10 +16,12 @@ function isPrismaUniqueConstraintError(
 const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   let statusCode = 500;
   let message = "Terjadi kesalahan pada server.";
+  let details: readonly { path: string; message: string }[] | undefined;
 
   if (err instanceof HttpError) {
     statusCode = err.statusCode;
     message = err.message;
+    details = err.details;
   } else if (isPrismaUniqueConstraintError(err)) {
     statusCode = 409;
     message = "Data yang diminta sudah terdaftar.";
@@ -50,6 +52,7 @@ const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   res.status(statusCode).json({
     status: "error",
     message,
+    ...(details ? { details } : {}),
   });
 };
 

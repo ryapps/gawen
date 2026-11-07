@@ -12,6 +12,17 @@ enum OrganizationRole {
   EMPLOYEE
 }
 
+enum OrganizationBusinessType {
+  FOOD_AND_BEVERAGE
+  RETAIL
+  SERVICES
+  BEAUTY_AND_WELLNESS
+  AUTOMOTIVE
+  MANUFACTURING
+  HOSPITALITY
+  OTHER
+}
+
 enum JoinRequestStatus {
   PENDING
   APPROVED
@@ -145,7 +156,7 @@ model Organization {
   id               String   @id @default(cuid())
   name             String
   businessCodeHash String?  @unique
-  businessType     String?
+  businessType     OrganizationBusinessType?
   description      String?
   logoUrl          String?
   email            String?
@@ -154,6 +165,14 @@ model Organization {
   address          String?
   city             String?
   province         String?
+  provinceCode     String?
+  provinceName     String?
+  regencyCode      String?
+  regencyName      String?
+  districtCode     String?
+  districtName     String?
+  villageCode      String?
+  villageName      String?
   postalCode       String?
   currency         String   @default("IDR")
   timezone         String   @default("Asia/Jakarta")
