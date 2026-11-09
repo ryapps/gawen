@@ -1,9 +1,143 @@
+import { randomUUID } from "node:crypto";
 import {
+  EmployeeStatus,
   JoinRequestStatus,
   OrganizationRole,
   Prisma,
 } from "../../generated/prisma/client.js";
 import prisma from "../../lib/prisma.js";
+
+const employeeManagementSelect = {
+  id: true,
+  organizationId: true,
+  userId: true,
+  fullName: true,
+  phone: true,
+  position: true,
+  status: true,
+  hiredAt: true,
+  user: {
+    select: {
+      name: true,
+      email: true,
+      phone: true,
+      photoProfile: true,
+    },
+  },
+} as const;
+
+export async function findEmployees(
+  organizationIds: string[],
+  input: {
+    search?: string;
+    status?: EmployeeStatus;
+    page: number;
+    limit: number;
+  },
+) {
+  const search = input.search || undefined;
+  const where: Prisma.EmployeeWhereInput = {
+    organizationId: { in: organizationIds },
+    ...(input.status ? { status: input.status } : {}),
+    ...(search
+      ? {
+          OR: [
+            { fullName: { contains: search, mode: "insensitive" } },
+            {
+              user: {
+                is: {
+                  name: { contains: search, mode: "insensitive" },
+                },
+              },
+            },
+          ],
+        }
+      : {}),
+  };
+  const [employees, total] = await prisma.$transaction([
+    prisma.employee.findMany({
+      where,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      skip: (input.page - 1) * input.limit,
+      take: input.limit,
+      select: employeeManagementSelect,
+    }),
+    prisma.employee.count({ where }),
+  ]);
+  return { employees, total };
+}
+
+export function findEmployee(employeeId: string, organizationIds: string[]) {
+  return prisma.employee.findFirst({
+    where: { id: employeeId, organizationId: { in: organizationIds } },
+    select: employeeManagementSelect,
+  });
+}
+
+export async function updateEmployeePosition(
+  employeeId: string,
+  organizationIds: string[],
+  position: string | null,
+) {
+  const updated = await prisma.employee.updateMany({
+    where: { id: employeeId, organizationId: { in: organizationIds } },
+    data: { position },
+  });
+  if (updated.count !== 1) return null;
+  return findEmployee(employeeId, organizationIds);
+}
+
+export async function updateEmployeeStatus(
+  employeeId: string,
+  organizationIds: string[],
+  status: EmployeeStatus,
+) {
+  const updated = await prisma.employee.updateMany({
+    where: { id: employeeId, organizationId: { in: organizationIds } },
+    data: { status },
+  });
+  if (updated.count !== 1) return null;
+  return findEmployee(employeeId, organizationIds);
+}
+
+async function syncEmployeeForMembership(
+  transaction: Prisma.TransactionClient,
+  organizationId: string,
+  userId: string,
+) {
+  const user = await transaction.user.findUniqueOrThrow({
+    where: { id: userId },
+    select: { name: true, phone: true },
+  });
+  const existing = await transaction.employee.findUnique({
+    where: { organizationId_userId: { organizationId, userId } },
+    select: { id: true, hiredAt: true },
+  });
+  if (existing) {
+    await transaction.employee.update({
+      where: { id: existing.id },
+      data: {
+        fullName: user.name,
+        phone: user.phone,
+        status: EmployeeStatus.ACTIVE,
+        hiredAt: existing.hiredAt ?? new Date(),
+      },
+    });
+    return;
+  }
+
+  await transaction.employee.create({
+    data: {
+      organizationId,
+      userId,
+      employeeCode: `EMP-${randomUUID().toUpperCase()}`,
+      fullName: user.name,
+      phone: user.phone,
+      status: EmployeeStatus.ACTIVE,
+      hiredAt: new Date(),
+    },
+  });
+}
 
 const organizationMemberSelect = {
   id: true,
@@ -206,6 +340,11 @@ export async function decideJoinRequest(input: {
             role: OrganizationRole.EMPLOYEE,
           },
         });
+        await syncEmployeeForMembership(
+          transaction,
+          input.organizationId,
+          joinRequest.userId,
+        );
       }
       return { result: "decided" as const };
     },
@@ -363,6 +502,11 @@ export async function acceptInvitation(input: {
           role: OrganizationRole.EMPLOYEE,
         },
       });
+      await syncEmployeeForMembership(
+        transaction,
+        invitation.organizationId,
+        input.userId,
+      );
       return { result: "accepted" as const };
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },

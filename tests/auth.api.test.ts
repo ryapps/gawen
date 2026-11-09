@@ -311,6 +311,16 @@ after(async () => {
         where: { userId: { in: [...userIds] } },
       });
     }
+    await prisma.employee.deleteMany({
+      where: {
+        OR: [
+          ...(userIds.size > 0 ? [{ userId: { in: [...userIds] } }] : []),
+          ...(organizationIds.size > 0
+            ? [{ organizationId: { in: [...organizationIds] } }]
+            : []),
+        ],
+      },
+    });
     await prisma.organizationMembership.deleteMany({
       where: {
         OR: [
@@ -1407,6 +1417,178 @@ test("employee membership endpoints are owner-only and scope details to the orga
     .get(`/api/employees/organizations/${owner.organizationId}/members`)
     .set("Authorization", `Bearer ${otherOwner.token}`);
   assert.equal(crossOrganizationList.status, 403);
+});
+
+test("employee management is owner-scoped, searchable, paginated, and updates job data and status", async () => {
+  const ownerResponse = await registration();
+  const owner = rememberUser(ownerResponse);
+  const ownerAuth = `Bearer ${owner.token}`;
+  const firstEmployeeResponse = await employeeRegistration();
+  const firstEmployee = rememberStandaloneUser(firstEmployeeResponse);
+  const firstEmployeeAuth = `Bearer ${firstEmployee.token}`;
+  const secondEmployeeResponse = await employeeRegistration();
+  const secondEmployee = rememberStandaloneUser(secondEmployeeResponse);
+  const secondEmployeeAuth = `Bearer ${secondEmployee.token}`;
+  const otherOwnerResponse = await registration();
+  const otherOwner = rememberUser(otherOwnerResponse);
+  const otherOwnerAuth = `Bearer ${otherOwner.token}`;
+  const outsideEmployeeResponse = await employeeRegistration();
+  const outsideEmployee = rememberStandaloneUser(outsideEmployeeResponse);
+  const outsideEmployeeAuth = `Bearer ${outsideEmployee.token}`;
+
+  await prisma.user.update({
+    where: { id: firstEmployee.userId },
+    data: { name: "Budi Santoso" },
+  });
+  await prisma.user.update({
+    where: { id: secondEmployee.userId },
+    data: { name: "Siti Aminah" },
+  });
+
+  const joinRequest = await fromIp(nextIp())(app)
+    .post("/api/employees/join-requests")
+    .set("Authorization", firstEmployeeAuth)
+    .send({ businessCode: ownerResponse.body.data.businessJoinCode });
+  assert.equal(joinRequest.status, 202);
+  const ownRequests = await fromIp(nextIp())(app)
+    .get("/api/employees/join-requests/me")
+    .set("Authorization", firstEmployeeAuth);
+  const requestId = ownRequests.body.data.requests[0].id as string;
+  const approved = await fromIp(nextIp())(app)
+    .post(
+      `/api/employees/organizations/${owner.organizationId}/join-requests/${requestId}/approve`,
+    )
+    .set("Authorization", ownerAuth);
+  assert.equal(approved.status, 200);
+
+  const invitation = await fromIp(nextIp())(app)
+    .post(`/api/employees/organizations/${owner.organizationId}/invitations`)
+    .set("Authorization", ownerAuth)
+    .send({ email: secondEmployeeResponse.body.data.user.email });
+  assert.equal(invitation.status, 201);
+  const acceptedInvitation = await fromIp(nextIp())(app)
+    .post("/api/employees/invitations/accept")
+    .set("Authorization", secondEmployeeAuth)
+    .send({ token: invitation.body.data.invitation.token });
+  assert.equal(acceptedInvitation.status, 200);
+
+  const outsideJoinRequest = await fromIp(nextIp())(app)
+    .post("/api/employees/join-requests")
+    .set("Authorization", outsideEmployeeAuth)
+    .send({ businessCode: otherOwnerResponse.body.data.businessJoinCode });
+  assert.equal(outsideJoinRequest.status, 202);
+  const outsideRequests = await fromIp(nextIp())(app)
+    .get("/api/employees/join-requests/me")
+    .set("Authorization", outsideEmployeeAuth);
+  const outsideRequestId = outsideRequests.body.data.requests[0].id as string;
+  const outsideApproval = await fromIp(nextIp())(app)
+    .post(
+      `/api/employees/organizations/${otherOwner.organizationId}/join-requests/${outsideRequestId}/approve`,
+    )
+    .set("Authorization", otherOwnerAuth);
+  assert.equal(outsideApproval.status, 200);
+
+  const unauthenticated = await fromIp(nextIp())(app).get("/api/employees");
+  assert.equal(unauthenticated.status, 401);
+  const employeeForbidden = await fromIp(nextIp())(app)
+    .get("/api/employees")
+    .set("Authorization", firstEmployeeAuth);
+  assert.equal(employeeForbidden.status, 403);
+
+  const firstPage = await fromIp(nextIp())(app)
+    .get("/api/employees?page=1&limit=1")
+    .set("Authorization", ownerAuth);
+  assert.equal(firstPage.status, 200);
+  assert.equal(firstPage.body.data.pagination.total, 2);
+  assert.equal(firstPage.body.data.pagination.totalPages, 2);
+  assert.equal(firstPage.body.data.employees.length, 1);
+  const secondPage = await fromIp(nextIp())(app)
+    .get("/api/employees?page=2&limit=1")
+    .set("Authorization", ownerAuth);
+  assert.equal(secondPage.body.data.employees.length, 1);
+  assert.notEqual(
+    firstPage.body.data.employees[0].id,
+    secondPage.body.data.employees[0].id,
+  );
+
+  const search = await fromIp(nextIp())(app)
+    .get("/api/employees?search=budi")
+    .set("Authorization", ownerAuth);
+  assert.equal(search.body.data.pagination.total, 1);
+  assert.equal(search.body.data.employees[0].name, "Budi Santoso");
+  assert.equal("passwordHash" in search.body.data.employees[0], false);
+
+  const firstEmployeeRecord = await prisma.employee.findUniqueOrThrow({
+    where: {
+      organizationId_userId: {
+        organizationId: owner.organizationId,
+        userId: firstEmployee.userId,
+      },
+    },
+    select: { id: true },
+  });
+  const detail = await fromIp(nextIp())(app)
+    .get(`/api/employees/${firstEmployeeRecord.id}`)
+    .set("Authorization", ownerAuth);
+  assert.equal(detail.status, 200);
+  assert.equal(detail.body.data.employee.userId, firstEmployee.userId);
+  assert.equal(detail.body.data.employee.status, "ACTIVE");
+  assert.equal("passwordHash" in detail.body.data.employee, false);
+
+  const positionUpdate = await fromIp(nextIp())(app)
+    .patch(`/api/employees/${firstEmployeeRecord.id}`)
+    .set("Authorization", ownerAuth)
+    .send({ position: "Kasir" });
+  assert.equal(positionUpdate.status, 200);
+  assert.equal(positionUpdate.body.data.employee.position, "Kasir");
+  const passwordUpdate = await fromIp(nextIp())(app)
+    .patch(`/api/employees/${firstEmployeeRecord.id}`)
+    .set("Authorization", ownerAuth)
+    .send({ password: "not-allowed" });
+  assert.equal(passwordUpdate.status, 400);
+
+  const deactivate = await fromIp(nextIp())(app)
+    .patch(`/api/employees/${firstEmployeeRecord.id}/status`)
+    .set("Authorization", ownerAuth)
+    .send({ status: "INACTIVE" });
+  assert.equal(deactivate.status, 200);
+  const inactiveEmployees = await fromIp(nextIp())(app)
+    .get("/api/employees?status=INACTIVE")
+    .set("Authorization", ownerAuth);
+  assert.equal(inactiveEmployees.body.data.pagination.total, 1);
+  const reactivate = await fromIp(nextIp())(app)
+    .patch(`/api/employees/${firstEmployeeRecord.id}/status`)
+    .set("Authorization", ownerAuth)
+    .send({ status: "ACTIVE" });
+  assert.equal(reactivate.status, 200);
+  const invalidStatus = await fromIp(nextIp())(app)
+    .patch(`/api/employees/${firstEmployeeRecord.id}/status`)
+    .set("Authorization", ownerAuth)
+    .send({ status: "SUSPENDED" });
+  assert.equal(invalidStatus.status, 400);
+
+  const outsideEmployeeRecord = await prisma.employee.findUniqueOrThrow({
+    where: {
+      organizationId_userId: {
+        organizationId: otherOwner.organizationId,
+        userId: outsideEmployee.userId,
+      },
+    },
+    select: { id: true },
+  });
+  const crossOrganizationDetail = await fromIp(nextIp())(app)
+    .get(`/api/employees/${outsideEmployeeRecord.id}`)
+    .set("Authorization", ownerAuth);
+  assert.equal(crossOrganizationDetail.status, 404);
+  const crossOrganizationUpdate = await fromIp(nextIp())(app)
+    .patch(`/api/employees/${outsideEmployeeRecord.id}`)
+    .set("Authorization", ownerAuth)
+    .send({ position: "Kasir" });
+  assert.equal(crossOrganizationUpdate.status, 404);
+  const invalidQuery = await fromIp(nextIp())(app)
+    .get("/api/employees?limit=101")
+    .set("Authorization", ownerAuth);
+  assert.equal(invalidQuery.status, 400);
 });
 
 test("auth endpoints apply database-backed rate limits", async () => {

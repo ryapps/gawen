@@ -6,6 +6,13 @@ import { createAuthRateLimiter } from "../../middlewares/auth-rate-limit.middlew
 const router = Router();
 
 router.use(requireAuth);
+router.get("/", employeesController.listManagedEmployees);
+router.get("/:employeeId", employeesController.getManagedEmployee);
+router.patch(
+  "/:employeeId/status",
+  employeesController.updateManagedEmployeeStatus,
+);
+router.patch("/:employeeId", employeesController.updateManagedEmployee);
 router.post(
   "/join-requests",
   createAuthRateLimiter("join-request", 5, 60 * 60 * 1000),

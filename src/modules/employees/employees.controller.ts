@@ -6,7 +6,10 @@ import * as employeesService from "./employees.service.js";
 import {
   acceptInvitationSchema,
   createInvitationSchema,
+  listEmployeesQuerySchema,
   joinOrganizationSchema,
+  updateEmployeeSchema,
+  updateEmployeeStatusSchema,
 } from "./employees.validation.js";
 
 type AuthenticatedRequest = Parameters<RequestHandler>[0] & {
@@ -41,6 +44,68 @@ export const requestMembership: RequestHandler = validateBody(
       message:
         "Jika kode bisnis valid dan belum ada permintaan, permintaan akan diproses.",
     });
+  },
+);
+
+export const listManagedEmployees: RequestHandler = async (req, res) => {
+  const result = listEmployeesQuerySchema.safeParse(req.query);
+  if (!result.success) {
+    throw new HttpError(
+      400,
+      "Data permintaan tidak valid.",
+      result.error.issues.map((issue) => ({
+        path: issue.path.join(".") || "query",
+        message: issue.message,
+      })),
+    );
+  }
+  const data = await employeesService.listManagedEmployees(
+    getAuth(req),
+    result.data,
+  );
+  res.status(200).json({ status: "ok", data });
+};
+
+export const getManagedEmployee: RequestHandler = async (req, res) => {
+  const employeeId = getRouteParam(req, "employeeId", "Karyawan tidak valid.");
+  const employee = await employeesService.getManagedEmployee(
+    getAuth(req),
+    employeeId,
+  );
+  res.status(200).json({ status: "ok", data: { employee } });
+};
+
+export const updateManagedEmployee: RequestHandler = validateBody(
+  updateEmployeeSchema,
+  async (req, res, input) => {
+    const employeeId = getRouteParam(
+      req,
+      "employeeId",
+      "Karyawan tidak valid.",
+    );
+    const employee = await employeesService.updateManagedEmployee(
+      getAuth(req),
+      employeeId,
+      input,
+    );
+    res.status(200).json({ status: "ok", data: { employee } });
+  },
+);
+
+export const updateManagedEmployeeStatus: RequestHandler = validateBody(
+  updateEmployeeStatusSchema,
+  async (req, res, input) => {
+    const employeeId = getRouteParam(
+      req,
+      "employeeId",
+      "Karyawan tidak valid.",
+    );
+    const employee = await employeesService.updateManagedEmployeeStatus(
+      getAuth(req),
+      employeeId,
+      input,
+    );
+    res.status(200).json({ status: "ok", data: { employee } });
   },
 );
 

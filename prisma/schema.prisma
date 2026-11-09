@@ -256,6 +256,7 @@ model Employee {
   employeeCode   String
   fullName       String
   phone          String?
+  position       String?
   status         EmployeeStatus @default(ACTIVE)
   hiredAt        DateTime?      @db.Date
   createdAt      DateTime       @default(now())

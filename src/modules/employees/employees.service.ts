@@ -6,12 +6,47 @@ import * as employeesRepository from "./employees.repository.js";
 import type {
   AcceptInvitationInput,
   CreateInvitationInput,
+  ListEmployeesQuery,
   JoinOrganizationInput,
+  UpdateEmployeeInput,
+  UpdateEmployeeStatusInput,
 } from "./employees.validation.js";
 
 const INVITATION_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 const BUSINESS_CODE_CHARACTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 const BUSINESS_CODE_LENGTH = 8;
+
+type EmployeeRecord = NonNullable<
+  Awaited<ReturnType<typeof employeesRepository.findEmployee>>
+>;
+
+function getOwnedOrganizationIds(auth: AuthContext) {
+  const organizationIds = [
+    ...new Set(
+      auth.user.memberships
+        .filter((membership) => membership.role === "OWNER")
+        .map((membership) => membership.organization.id),
+    ),
+  ];
+  if (organizationIds.length === 0) {
+    throw new HttpError(403, "Anda tidak memiliki akses.");
+  }
+  return organizationIds;
+}
+
+function toEmployeeResponse(employee: EmployeeRecord) {
+  return {
+    id: employee.id,
+    userId: employee.userId,
+    name: employee.user?.name ?? employee.fullName,
+    photoProfile: employee.user?.photoProfile ?? null,
+    email: employee.user?.email ?? null,
+    phone: employee.user ? employee.user.phone : employee.phone,
+    position: employee.position,
+    status: employee.status,
+    joinedAt: employee.hiredAt,
+  };
+}
 
 function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
@@ -22,6 +57,71 @@ function createBusinessCode(): string {
     { length: BUSINESS_CODE_LENGTH },
     () => BUSINESS_CODE_CHARACTERS[randomInt(BUSINESS_CODE_CHARACTERS.length)],
   ).join("");
+}
+
+export async function listManagedEmployees(
+  auth: AuthContext,
+  input: ListEmployeesQuery,
+) {
+  const result = await employeesRepository.findEmployees(
+    getOwnedOrganizationIds(auth),
+    input,
+  );
+  return {
+    employees: result.employees.map(toEmployeeResponse),
+    pagination: {
+      page: input.page,
+      limit: input.limit,
+      total: result.total,
+      totalPages: Math.ceil(result.total / input.limit),
+    },
+  };
+}
+
+export async function getManagedEmployee(
+  auth: AuthContext,
+  employeeId: string,
+) {
+  const employee = await employeesRepository.findEmployee(
+    employeeId,
+    getOwnedOrganizationIds(auth),
+  );
+  if (!employee) {
+    throw new HttpError(404, "Karyawan tidak tersedia.");
+  }
+  return toEmployeeResponse(employee);
+}
+
+export async function updateManagedEmployee(
+  auth: AuthContext,
+  employeeId: string,
+  input: UpdateEmployeeInput,
+) {
+  const employee = await employeesRepository.updateEmployeePosition(
+    employeeId,
+    getOwnedOrganizationIds(auth),
+    input.position ?? null,
+  );
+  if (!employee) {
+    throw new HttpError(404, "Karyawan tidak tersedia.");
+  }
+  return toEmployeeResponse(employee);
+}
+
+export async function updateManagedEmployeeStatus(
+  auth: AuthContext,
+  employeeId: string,
+  input: UpdateEmployeeStatusInput,
+) {
+  const employee = await employeesRepository.updateEmployeeStatus(
+    employeeId,
+    getOwnedOrganizationIds(auth),
+    input.status,
+  );
+  if (!employee) {
+    throw new HttpError(404, "Karyawan tidak tersedia.");
+  }
+  return toEmployeeResponse(employee);
 }
 
 export async function requestMembership(
