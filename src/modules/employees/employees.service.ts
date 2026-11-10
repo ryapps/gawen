@@ -148,7 +148,10 @@ export async function requestMembership(
 }
 
 export function listOwnRequests(auth: AuthContext) {
-  return employeesRepository.findUserJoinRequests(auth.user.id);
+  return employeesRepository.findOwnJoinActivity(
+    auth.user.id,
+    auth.user.email,
+  );
 }
 
 export function listOrganizationMembers(organizationId: string) {

@@ -808,6 +808,14 @@ test("owner invitations accept only the intended account, create EMPLOYEE member
     organization.name,
   );
 
+  const ownJoinActivity = await fromIp(nextIp())(app)
+    .get("/api/employees/join-requests/me")
+    .set("Authorization", `Bearer ${employee.token}`);
+  assert.equal(ownJoinActivity.status, 200);
+  assert.equal(ownJoinActivity.body.data.requests.length, 0);
+  assert.equal(ownJoinActivity.body.data.invitations.length, 1);
+  assert.equal(ownJoinActivity.body.data.invitations[0].id, invitation.id);
+
   const wrongAccount = await fromIp(nextIp())(app)
     .post(`/api/employees/invitations/${invitation.id}/accept`)
     .set("Authorization", `Bearer ${wrongEmployee.token}`)

@@ -259,6 +259,14 @@ export function findUserJoinRequests(userId: string) {
   });
 }
 
+export async function findOwnJoinActivity(userId: string, email: string) {
+  const [requests, invitations] = await Promise.all([
+    findUserJoinRequests(userId),
+    findInvitationsForUser(email),
+  ]);
+  return { requests, invitations };
+}
+
 export function findPendingJoinRequests(organizationId: string) {
   return prisma.employeeJoinRequest.findMany({
     where: { organizationId, status: JoinRequestStatus.PENDING },

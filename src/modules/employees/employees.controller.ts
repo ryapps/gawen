@@ -110,8 +110,8 @@ export const updateManagedEmployeeStatus: RequestHandler = validateBody(
 );
 
 export const listOwnRequests: RequestHandler = async (req, res) => {
-  const requests = await employeesService.listOwnRequests(getAuth(req));
-  res.status(200).json({ status: "ok", data: { requests } });
+  const result = await employeesService.listOwnRequests(getAuth(req));
+  res.status(200).json({ status: "ok", data: result });
 };
 
 export const listOrganizationMembers: RequestHandler = async (req, res) => {
