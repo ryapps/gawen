@@ -176,6 +176,20 @@ export const createInvitation: RequestHandler = validateBody(
   },
 );
 
+export const listOwnInvitations: RequestHandler = async (req, res) => {
+  const invitations = await employeesService.listOwnInvitations(getAuth(req));
+  res.status(200).json({ status: "ok", data: { invitations } });
+};
+
+export const acceptInvitationById: RequestHandler = async (req, res) => {
+  const invitationId = getRouteParam(req, "invitationId", "Undangan tidak valid.");
+  const result = await employeesService.acceptInvitationById(
+    getAuth(req),
+    invitationId,
+  );
+  res.status(200).json({ status: "ok", data: result });
+};
+
 export const revokeInvitation: RequestHandler = async (req, res) => {
   const organizationId = getRouteParam(req, "organizationId", "Organisasi tidak valid.");
   const invitationId = getRouteParam(req, "invitationId", "Undangan tidak valid.");

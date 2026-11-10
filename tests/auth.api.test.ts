@@ -771,6 +771,13 @@ test("owner invitations accept only the intended account, create EMPLOYEE member
     .send({ email: "invalid-email" });
   assert.equal(invalidEmailInvitation.status, 400);
 
+  const missingAccountInvitation = await fromIp(nextIp())(app)
+    .post(`/api/employees/organizations/${owner.organizationId}/invitations`)
+    .set("Authorization", `Bearer ${owner.token}`)
+    .send({ email: `not-registered-${randomBytes(4).toString("hex")}@example.com` });
+  assert.equal(missingAccountInvitation.status, 404);
+  assert.match(missingAccountInvitation.body.message, /belum terdaftar/i);
+
   const invitationResponse = await fromIp(nextIp())(app)
     .post(`/api/employees/organizations/${owner.organizationId}/invitations`)
     .set("Authorization", `Bearer ${owner.token}`)
@@ -778,22 +785,38 @@ test("owner invitations accept only the intended account, create EMPLOYEE member
   assert.equal(invitationResponse.status, 201);
   const invitation = invitationResponse.body.data.invitation;
   assert.equal(invitation.email, employeeResponse.body.data.user.email);
+  assert.equal(invitation.token, undefined);
   const storedInvitation = await prisma.organizationInvitation.findUniqueOrThrow({
     where: { id: invitation.id },
     select: { tokenHash: true, expiresAt: true },
   });
-  assert.notEqual(storedInvitation.tokenHash, invitation.token);
+  assert.ok(storedInvitation.tokenHash);
   assert.ok(storedInvitation.expiresAt.getTime() > Date.now());
 
+  const inbox = await fromIp(nextIp())(app)
+    .get("/api/employees/invitations/me")
+    .set("Authorization", `Bearer ${employee.token}`);
+  assert.equal(inbox.status, 200);
+  assert.equal(inbox.body.data.invitations.length, 1);
+  assert.equal(inbox.body.data.invitations[0].id, invitation.id);
+  const organization = await prisma.organization.findUniqueOrThrow({
+    where: { id: owner.organizationId },
+    select: { name: true },
+  });
+  assert.equal(
+    inbox.body.data.invitations[0].organization.name,
+    organization.name,
+  );
+
   const wrongAccount = await fromIp(nextIp())(app)
-    .post("/api/employees/invitations/accept")
+    .post(`/api/employees/invitations/${invitation.id}/accept`)
     .set("Authorization", `Bearer ${wrongEmployee.token}`)
-    .send({ token: invitation.token });
+    .send({});
   assert.equal(wrongAccount.status, 400);
   const accepted = await fromIp(nextIp())(app)
-    .post("/api/employees/invitations/accept")
+    .post(`/api/employees/invitations/${invitation.id}/accept`)
     .set("Authorization", `Bearer ${employee.token}`)
-    .send({ token: invitation.token });
+    .send({});
   assert.equal(accepted.status, 200);
 
   const profile = await fromIp(nextIp())(app)
@@ -802,9 +825,9 @@ test("owner invitations accept only the intended account, create EMPLOYEE member
   assert.equal(profile.body.data.user.memberships[0].role, "EMPLOYEE");
   assert.equal(profile.body.data.user.memberships[0].organization.id, owner.organizationId);
   const replay = await fromIp(nextIp())(app)
-    .post("/api/employees/invitations/accept")
+    .post(`/api/employees/invitations/${invitation.id}/accept`)
     .set("Authorization", `Bearer ${employee.token}`)
-    .send({ token: invitation.token });
+    .send({});
   assert.equal(replay.status, 400);
 
   const revocable = await fromIp(nextIp())(app)
@@ -817,9 +840,9 @@ test("owner invitations accept only the intended account, create EMPLOYEE member
     .set("Authorization", `Bearer ${owner.token}`);
   assert.equal(revoke.status, 200);
   const revokedAccept = await fromIp(nextIp())(app)
-    .post("/api/employees/invitations/accept")
+    .post(`/api/employees/invitations/${revocable.body.data.invitation.id}/accept`)
     .set("Authorization", `Bearer ${wrongEmployee.token}`)
-    .send({ token: revocable.body.data.invitation.token });
+    .send({});
   assert.equal(revokedAccept.status, 400);
 
   const expiredToken = randomBytes(32).toString("base64url");

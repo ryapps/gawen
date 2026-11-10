@@ -399,11 +399,47 @@ export function createInvitation(input: {
       return { result: "not-owner" as const };
     }
 
+    const user = await transaction.user.findUnique({
+      where: { email: input.email },
+      select: {
+        email: true,
+        memberships: {
+          where: { organizationId: input.organizationId },
+          select: { id: true },
+        },
+      },
+    });
+    if (!user) {
+      return { result: "user-not-found" as const };
+    }
+    if (user.memberships.length > 0) {
+      return { result: "already-member" as const };
+    }
+
     const invitation = await transaction.organizationInvitation.create({
-      data: input,
+      data: { ...input, email: user.email },
       select: { id: true, email: true, expiresAt: true, createdAt: true },
     });
     return { result: "created" as const, invitation };
+  });
+}
+
+export function findInvitationsForUser(email: string) {
+  return prisma.organizationInvitation.findMany({
+    where: {
+      email,
+      acceptedAt: null,
+      revokedAt: null,
+      expiresAt: { gt: new Date() },
+    },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: {
+      id: true,
+      email: true,
+      expiresAt: true,
+      createdAt: true,
+      organization: { select: { id: true, name: true } },
+    },
   });
 }
 
@@ -438,15 +474,19 @@ export function revokeInvitation(
   });
 }
 
-export async function acceptInvitation(input: {
-  tokenHash: string;
-  userId: string;
-  userEmail: string;
-}) {
+export async function acceptInvitation(
+  input: {
+    lookup: { by: "tokenHash"; value: string } | { by: "id"; value: string };
+    userId: string;
+    userEmail: string;
+  },
+) {
   return prisma.$transaction(
     async (transaction) => {
       const invitation = await transaction.organizationInvitation.findUnique({
-        where: { tokenHash: input.tokenHash },
+        where: input.lookup.by === "id"
+          ? { id: input.lookup.value }
+          : { tokenHash: input.lookup.value },
         select: {
           id: true,
           organizationId: true,

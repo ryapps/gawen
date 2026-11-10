@@ -56,6 +56,12 @@ router.post(
   createAuthRateLimiter("employee-invitation", 20, 60 * 60 * 1000),
   employeesController.createInvitation,
 );
+router.get("/invitations/me", employeesController.listOwnInvitations);
+router.post(
+  "/invitations/:invitationId/accept",
+  createAuthRateLimiter("invitation-accept", 10, 15 * 60 * 1000),
+  employeesController.acceptInvitationById,
+);
 router.post(
   "/organizations/:organizationId/invitations/:invitationId/revoke",
   requireOrganizationRole("OWNER"),

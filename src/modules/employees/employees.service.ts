@@ -246,16 +246,28 @@ export async function createInvitation(
   if (invitation.result === "not-owner") {
     throw new HttpError(403, "Anda tidak memiliki akses.");
   }
-  return { ...invitation.invitation, token };
+  if (invitation.result === "user-not-found") {
+    throw new HttpError(404, "Email belum terdaftar pada akun Gawen.");
+  }
+  if (invitation.result === "already-member") {
+    throw new HttpError(409, "Pengguna tersebut sudah menjadi anggota organisasi.");
+  }
+  return invitation.invitation;
 }
 
-export async function acceptInvitation(
+export async function listOwnInvitations(auth: AuthContext) {
+  return employeesRepository.findInvitationsForUser(auth.user.email);
+}
+
+async function completeInvitationAcceptance(
   auth: AuthContext,
-  input: AcceptInvitationInput,
+  invitationLookup: { tokenHash: string } | { invitationId: string },
 ) {
   try {
     const result = await employeesRepository.acceptInvitation({
-      tokenHash: hashToken(input.token),
+      lookup: "tokenHash" in invitationLookup
+        ? { by: "tokenHash", value: invitationLookup.tokenHash }
+        : { by: "id", value: invitationLookup.invitationId },
       userId: auth.user.id,
       userEmail: auth.user.email,
     });
@@ -275,6 +287,22 @@ export async function acceptInvitation(
     }
     throw error;
   }
+}
+
+export function acceptInvitation(
+  auth: AuthContext,
+  input: AcceptInvitationInput,
+) {
+  return completeInvitationAcceptance(auth, {
+    tokenHash: hashToken(input.token),
+  });
+}
+
+export function acceptInvitationById(
+  auth: AuthContext,
+  invitationId: string,
+) {
+  return completeInvitationAcceptance(auth, { invitationId });
 }
 
 export async function revokeInvitation(
