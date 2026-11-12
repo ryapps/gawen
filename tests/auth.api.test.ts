@@ -971,6 +971,60 @@ test("login accepts valid credentials and returns a generic error for invalid cr
   assert.ok(created.userId);
 });
 
+test("login enforces the selected account type and allows employees without memberships", async () => {
+  const ownerEmail = `mode-owner-${randomUUID()}@example.test`;
+  const ownerSignup = await submitOwnerRegistration(ownerEmail, nextIp());
+  assert.equal(ownerSignup.status, 202);
+  const ownerLogin = await fromIp(nextIp())(app)
+    .post("/api/auth/login")
+    .send({
+      email: ownerEmail,
+      password: TEST_PASSWORD,
+      accountType: "OWNER",
+    });
+  assert.equal(ownerLogin.status, 200);
+  const owner = rememberUser({ status: ownerLogin.status, body: ownerLogin.body });
+
+  const ownerAsEmployee = await fromIp(nextIp())(app)
+    .post("/api/auth/login")
+    .send({
+      email: ownerEmail,
+      password: TEST_PASSWORD,
+      accountType: "EMPLOYEE",
+    });
+  assert.equal(ownerAsEmployee.status, 403);
+  assert.equal(
+    ownerAsEmployee.body.message,
+    "Mode login tidak sesuai dengan jenis akun. Periksa pilihan Pemilik atau Karyawan.",
+  );
+  assert.equal(
+    loginSchema.safeParse({
+      email: ownerEmail,
+      password: TEST_PASSWORD,
+      accountType: "ADMIN",
+    }).success,
+    false,
+  );
+
+  const employeeEmail = `mode-employee-${randomUUID()}@example.test`;
+  const employeeSignup = await submitEmployeeRegistration(
+    employeeEmail,
+    nextIp(),
+  );
+  assert.equal(employeeSignup.status, 202);
+  const employeeLogin = await fromIp(nextIp())(app)
+    .post("/api/auth/login")
+    .send({
+      email: employeeEmail,
+      password: TEST_PASSWORD,
+      accountType: "EMPLOYEE",
+    });
+  assert.equal(employeeLogin.status, 200);
+  assert.deepEqual(employeeLogin.body.data.user.memberships, []);
+  userIds.add(employeeLogin.body.data.user.id);
+  assert.ok(owner.userId);
+});
+
 test("profile requires a valid bearer session and logout revokes it", async () => {
   const registered = await registration();
   assert.equal(registered.status, 202);

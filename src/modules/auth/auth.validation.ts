@@ -27,6 +27,7 @@ export const loginSchema = z
   .object({
     email: emailSchema,
     password: z.string().min(1).max(128),
+    accountType: z.enum(["OWNER", "EMPLOYEE"]).optional(),
   })
   .strict();
 

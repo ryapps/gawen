@@ -78,6 +78,20 @@ export async function login(input: LoginInput) {
     throw new HttpError(401, "Email atau password tidak valid.");
   }
 
+  if (input.accountType) {
+    const hasOwnerRole = user.memberships.some(
+      (membership) => membership.role === "OWNER",
+    );
+    const accountTypeMatches =
+      input.accountType === "OWNER" ? hasOwnerRole : !hasOwnerRole;
+    if (!accountTypeMatches) {
+      throw new HttpError(
+        403,
+        "Mode login tidak sesuai dengan jenis akun. Periksa pilihan Pemilik atau Karyawan.",
+      );
+    }
+  }
+
   const { token, tokenHash } = createToken();
   const expiresAt = new Date(Date.now() + SESSION_LIFETIME_MS);
   await authRepository.createSession(user.id, tokenHash, expiresAt);
